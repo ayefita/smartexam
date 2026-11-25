@@ -2,6 +2,8 @@
 
 Smart Online Examination System for universities, schools, and employers in Ethiopia. One installation can host exit exams, entrance exams, and job recruitment tests.
 
+Live site: **https://smartexam-kappa.vercel.app** (hosted on Vercel).
+
 The interface is in English, Amharic, and Afaan Oromo. Question text stays in the language you wrote it. Edit the dictionaries in `src/lib/i18n.ts`.
 
 ## Demo accounts
@@ -147,7 +149,8 @@ For a shared deployment:
 
 1. Import the Git repository. The framework preset is Next.js. Build command `npm run build`.
 2. Add the environment variables from `.env.example`: `DATABASE_URL`, `NEXT_PUBLIC_APP_URL`, `SEED_DEMO`, `CRON_SECRET`, and any email or SMS keys.
-3. Deploy. `vercel.json` calls `GET /api/cron/release` every hour. Set `CRON_SECRET`. Vercel sends it as `Authorization: Bearer <CRON_SECRET>` when that variable exists. Hobby accounts only allow a daily cron; if the deploy rejects the hourly schedule, change `vercel.json` to `"schedule": "0 8 * * *"`. Marks still appear on the next page view after the release time. The cron is what sends the result email.
+3. Deploy. `vercel.json` calls `GET /api/cron/release` once a day at 06:00 UTC (09:00 Addis Ababa), because Hobby accounts only allow a daily cron. On a Pro account you can set `"schedule": "0 * * * *"` for hourly. Set `CRON_SECRET`; Vercel sends it as `Authorization: Bearer <CRON_SECRET>`. Marks still appear on the next page view after the release time. The cron is what sends the result email.
+4. Set `DB_POOL_MODE=transaction` with a Supabase pooler URL so many students can save at once.
 
 ```bash
 npx vercel deploy
@@ -155,6 +158,8 @@ npx vercel deploy --prod
 ```
 
 ## Deploy on Netlify
+
+The site used to run at smartexam-et.netlify.app and moved to Vercel when the free Netlify credits ran out.
 
 1. Create a site from the repository. `netlify.toml` sets Node 22 and `npm run build`.
 2. Either set `DATABASE_URL` to Supabase or another Postgres, or install `@netlify/database` and let Netlify provision Postgres. With Netlify Database, commit the migration under `netlify/database/migrations/` and let the deploy apply it. Do not run that SQL by hand against the hosted database.

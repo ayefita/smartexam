@@ -150,7 +150,7 @@ For a shared deployment:
 1. Import the Git repository. The framework preset is Next.js. Build command `npm run build`.
 2. Add the environment variables from `.env.example`: `DATABASE_URL`, `NEXT_PUBLIC_APP_URL`, `SEED_DEMO`, `CRON_SECRET`, and any email or SMS keys.
 3. Deploy. `vercel.json` calls `GET /api/cron/release` once a day at 06:00 UTC (09:00 Addis Ababa), because Hobby accounts only allow a daily cron. On a Pro account you can set `"schedule": "0 * * * *"` for hourly. Set `CRON_SECRET`; Vercel sends it as `Authorization: Bearer <CRON_SECRET>`. Marks still appear on the next page view after the release time. The cron is what sends the result email.
-4. Set `DB_POOL_MODE=transaction` with a Supabase pooler URL so many students can save at once.
+4. Use the Supabase pooler URL in session mode (port 5432) and leave `DB_POOL_MODE` unset or `session`. On Vercel the transaction pooler (port 6543) made pages hang, so it is off. Session mode allows about 15 database clients, which is plenty for normal use; for a very large exam day, test first.
 
 ```bash
 npx vercel deploy

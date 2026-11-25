@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { PageHeader, Pill } from "@/components/ui-app";
+import { EmptyState, PageHeader, Pill } from "@/components/ui-app";
 import { requireUser } from "@/lib/auth";
 import { listExams } from "@/lib/domain";
 import { getDictionary } from "@/lib/locale";
@@ -10,7 +10,8 @@ export default async function ReportsPage() {
   const exams = await listExams(user);
   return (
     <div>
-      <PageHeader title={dict.reports.title} />
+      <PageHeader title={dict.ux.nav.results} />
+      {exams.length === 0 ? <EmptyState title={dict.ux.empty.results} help={dict.ux.empty.resultsHelp} /> : null}
       <div className="grid gap-2">
         {exams.map((exam) => (
           <Link key={exam.id} href={`/reports/exams/${exam.id}`} className="flex items-center justify-between rounded-xl bg-card px-4 py-3 ring-1 ring-foreground/10">

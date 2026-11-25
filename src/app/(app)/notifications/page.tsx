@@ -1,4 +1,4 @@
-import { PageHeader, Pill } from "@/components/ui-app";
+import { EmptyState, PageHeader, Pill } from "@/components/ui-app";
 import { requireUser } from "@/lib/auth";
 import { listNotifications } from "@/lib/domain";
 import { formatAddis } from "@/lib/format";
@@ -12,6 +12,7 @@ export default async function NotificationsPage() {
   return (
     <div>
       <PageHeader title={dict.nav.notifications} lede={smtp ? "" : dict.auth.verifyDev} />
+      {rows.length === 0 ? <EmptyState title={dict.ux.empty.messages} /> : null}
       <ul className="grid gap-3">
         {rows.map((row) => (
           <li key={row.id} className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">

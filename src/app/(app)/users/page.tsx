@@ -3,7 +3,7 @@ import { saveUserAction } from "@/app/actions/staff";
 import { ResetLoginButton } from "@/components/credentials";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Field, NativeSelect, Notice, PageHeader, Pill } from "@/components/ui-app";
+import { EmptyState, Field, NativeSelect, Notice, PageHeader, Pill } from "@/components/ui-app";
 import { requireUser } from "@/lib/auth";
 import { listOrganizations, listUsers } from "@/lib/domain";
 import { getDictionary } from "@/lib/locale";
@@ -15,9 +15,11 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
   const [users, organizations] = await Promise.all([listUsers(user), user.role === "super_admin" ? listOrganizations() : Promise.resolve([])]);
   return (
     <div>
-      <PageHeader title={dict.nav.users} actions={<Link href="/users/import" className="inline-flex h-10 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground">{dict.creds.importTitle}</Link>} />
+      <PageHeader title={dict.ux.nav.students} lede={dict.ux.users.lead} actions={<><Button className="h-11 px-5" render={<Link href="/users/import" />}>{dict.ux.guide.s3Btn}</Button><Button variant="outline" className="h-11" render={<Link href="/groups" />}>{dict.ux.users.groupsLink}</Button></>} />
       <Notice error text={params.error ? dict.errors[params.error as keyof typeof dict.errors] || dict.errors.generic : ""} />
-      <form action={saveUserAction} className="mb-6 grid max-w-xl gap-3 rounded-2xl bg-card p-4 ring-1 ring-foreground/10">
+      <details className="mb-6 max-w-xl rounded-2xl bg-card p-4 ring-1 ring-foreground/10">
+      <summary className="cursor-pointer font-medium focus-visible:outline-2 focus-visible:outline-primary">{dict.ux.users.addOne}</summary>
+      <form action={saveUserAction} className="mt-3 grid gap-3">
         <Field label={dict.auth.fullName}><Input name="fullName" required className="h-11" /></Field>
         <Field label={dict.common.email}><Input name="email" type="email" required className="h-11" /></Field>
         <Field label={dict.common.phone} hint={dict.errors.phone}><Input name="phone" className="h-11" /></Field>
@@ -29,13 +31,15 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
           </>
         ) : <input type="hidden" name="organizationId" value={user.organizationId || ""} />}
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="active" defaultChecked /> {dict.status.active}</label>
-        <Button type="submit" className="h-11 w-fit">{dict.common.create}</Button>
+        <Button type="submit" variant="outline" className="h-11 w-fit">{dict.common.create}</Button>
       </form>
+      </details>
+      {users.filter((person) => person.role === "candidate").length === 0 ? <div className="mb-6"><EmptyState title={dict.ux.empty.users} help={dict.ux.empty.usersHelp} action={<Button className="h-11" render={<Link href="/users/import" />}>{dict.ux.guide.s3Btn}</Button>} /></div> : null}
       <ul className="grid gap-2">
         {users.map((person) => (
           <li key={person.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-card px-4 py-3 ring-1 ring-foreground/10">
             <span>{person.fullName}<span className="block text-sm text-muted-foreground">{person.email} {person.phone ? `· ${person.phone}` : ""} {person.candidateNumber ? `· ${person.candidateNumber}` : ""}</span></span>
-            <span className="flex flex-wrap items-start justify-end gap-2"><Pill>{dict.roles[person.role]}</Pill><Pill tone={person.active ? "good" : "wait"}>{person.active ? dict.status.active : dict.status.inactive}</Pill>{person.role === "candidate" && person.organizationId ? <ResetLoginButton dict={dict} userId={person.id} email={person.email} /> : null}</span>
+            <span className="flex flex-wrap items-start justify-end gap-2"><Pill>{dict.ux.roles[person.role]}</Pill><Pill tone={person.active ? "good" : "wait"}>{person.active ? dict.status.active : dict.status.inactive}</Pill>{person.role === "candidate" && person.organizationId ? <ResetLoginButton dict={dict} userId={person.id} email={person.email} /> : null}</span>
           </li>
         ))}
       </ul>

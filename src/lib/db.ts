@@ -119,8 +119,9 @@ async function ensureSchema(runner: Runner) {
   try {
     const rows = await runner.query(`select value from app_meta where key = 'schema'`);
     current = String(rows[0]?.value ?? "");
-  } catch {
-    // First boot on this database: app_meta does not exist yet.
+  } catch (error) {
+    // First boot on this database: app_meta does not exist yet. Anything else (a network drop) is a real error.
+    if (!/app_meta|does not exist|42P01/.test(String((error as { code?: string })?.code || "") + String((error as Error)?.message || ""))) throw error;
   }
   if (current === SCHEMA_VERSION) return;
   await runner.exec(SCHEMA);
@@ -132,8 +133,10 @@ async function ensureSchema(runner: Runner) {
 }
 
 async function init(): Promise<Runner> {
+  const started = Date.now();
   const runner = await createRunner();
   await ensureSchema(runner);
+  if (process.env.VERCEL || process.env.NETLIFY) console.log(`[db] ready in ${Date.now() - started}ms`);
   globalForDb.__smartexamRunner = runner;
   const { seedIfEmpty } = await import("./seed");
   await seedIfEmpty();
@@ -158,14 +161,35 @@ async function getRunner() {
   return runner;
 }
 
+/** Logs queries that take unusually long, so a stuck page can be traced from the host's logs. */
+async function watched<T>(label: string, run: () => Promise<T>) {
+  const started = Date.now();
+  const timer = setTimeout(() => console.warn(`[db] still waiting after 10s: ${label}`), 10_000);
+  try {
+    return await run();
+  } finally {
+    clearTimeout(timer);
+    const took = Date.now() - started;
+    if (took > 3000) console.warn(`[db] slow ${took}ms: ${label}`);
+  }
+}
+
+function labelOf(text: string) {
+  return text.replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
 export async function query<T = Record<string, unknown>>(text: string, params: unknown[] = []) {
-  const runner = await getRunner();
-  return runner.query(text, params) as Promise<T[]>;
+  return watched(labelOf(text), async () => {
+    const runner = await getRunner();
+    return runner.query(text, params) as Promise<T[]>;
+  });
 }
 
 export async function tx<T>(fn: (q: QueryFn) => Promise<T>) {
-  const runner = await getRunner();
-  return runner.tx(fn);
+  return watched("transaction", async () => {
+    const runner = await getRunner();
+    return runner.tx(fn);
+  });
 }
 
 export async function exec(sql: string) {

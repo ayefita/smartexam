@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { importQuestionsAction } from "@/app/actions/staff";
 import { Flash } from "@/components/flash";
+import { PaperImport } from "@/components/paper-import";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, NativeSelect, Notice, PageHeader } from "@/components/ui-app";
@@ -19,7 +20,7 @@ export default async function ImportPage({ searchParams }: { searchParams: Promi
   const skipped = Number(params.skipped || 0);
   const done = params.imported != null;
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-3xl">
       <PageHeader title={dict.ux.guide.s1Btn} lede={dict.ux.guide.s1Help} />
       <Notice error text={params.error ? dict.errors[params.error as keyof typeof dict.errors] || dict.errors.generic : ""} />
       {done ? (
@@ -43,6 +44,13 @@ export default async function ImportPage({ searchParams }: { searchParams: Promi
         <Field label={t.file} hint={dict.questions.importLead}><Input name="file" type="file" accept=".csv,.xlsx,text/csv" required className="h-11" /></Field>
         <Button type="submit" variant={done ? "outline" : "default"} className="h-11 w-fit px-5">{t.upload}</Button>
       </form>
+      <div className="mt-6">
+        <PaperImport
+          dict={dict}
+          organizations={organizations.map((org) => ({ id: org.id, name: org.name }))}
+          organizationId={user.role === "super_admin" ? organizations[0]?.id || "" : user.organizationId || ""}
+        />
+      </div>
     </div>
   );
 }

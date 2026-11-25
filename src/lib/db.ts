@@ -23,6 +23,15 @@ export function usingLocalFile() {
   return !url || url.startsWith("file:");
 }
 
+/**
+ * Callers pass JSON as already-stringified text (`$3::jsonb` with JSON.stringify). postgres.js
+ * would see a jsonb parameter and encode that string a second time, storing a JSON string instead
+ * of an array or object. Casting through text keeps the value exactly as the caller wrote it.
+ */
+function jsonText(text: string) {
+  return text.replace(/(\$\d+)::jsonb/g, "$1::text::jsonb");
+}
+
 function needsSsl(url: string) {
   return !/localhost|127\.0\.0\.1|\[::1\]/.test(url);
 }
@@ -46,12 +55,12 @@ async function createRunner(): Promise<Runner> {
         await sql.unsafe(text);
       },
       async query(text, params = []) {
-        return (await sql.unsafe(text, params as never[])) as unknown as Record<string, unknown>[];
+        return (await sql.unsafe(jsonText(text), params as never[])) as unknown as Record<string, unknown>[];
       },
       tx<T>(fn: (q: QueryFn) => Promise<T>) {
         return sql.begin(async (trx) => {
           const q: QueryFn = async (text, params = []) =>
-            (await trx.unsafe(text, params as never[])) as unknown as Record<string, unknown>[];
+            (await trx.unsafe(jsonText(text), params as never[])) as unknown as Record<string, unknown>[];
           return fn(q);
         }) as Promise<T>;
       },

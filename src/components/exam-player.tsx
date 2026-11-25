@@ -337,8 +337,8 @@ export function ExamPlayer({
   };
 
   return (
-    <div className="mx-auto grid max-w-5xl gap-4">
-      <div className="sticky top-16 z-20 -mx-4 flex flex-nowrap items-center justify-between gap-3 border-b border-border bg-background/95 px-4 py-2 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0">
+    <div className="mx-auto grid w-full min-w-0 max-w-5xl gap-4">
+      <div className="sticky top-16 z-20 flex min-w-0 flex-nowrap items-center justify-between gap-3 border-b border-border bg-background/95 py-2 backdrop-blur md:static md:border-0 md:bg-transparent md:py-0">
         <div className="min-w-0">
           <p className="text-xs uppercase tracking-wide text-muted-foreground">{fill(dict.player.question, { n: index + 1, total: questions.length })}</p>
           <h1 className="truncate font-heading text-lg font-semibold md:text-2xl">{title}</h1>
@@ -352,7 +352,7 @@ export function ExamPlayer({
       {offline ? <p className="rounded-lg bg-[#f8efd4] px-3 py-2 text-sm text-[#6b5420]" role="status">{dict.player.offline}</p> : null}
       {cameraFail ? <p className="rounded-lg bg-[#f8efd4] px-3 py-2 text-sm text-[#6b5420]" role="status">{dict.player.cameraFail}</p> : null}
       {warnTab ? <p className="rounded-lg bg-[#fde8ec] px-3 py-2 text-sm text-[#8e1e32]" role="status">{dict.player.tabWarn}</p> : null}
-      <div className="grid gap-4 lg:grid-cols-[1fr_220px]">
+      <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
         <article className="rounded-2xl bg-card p-4 ring-1 ring-foreground/10 md:p-6">
           <p className="text-sm text-muted-foreground">{fill(dict.player.question, { n: index + 1, total: questions.length })} · {question.points} {dict.common.points}</p>
           {question.mediaUrl && question.mediaKind === "image" ? (

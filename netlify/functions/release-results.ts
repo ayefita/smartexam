@@ -1,0 +1,13 @@
+export default async () => {
+  const url = process.env.URL || process.env.DEPLOY_PRIME_URL;
+  if (!url) return new Response("No site URL", { status: 500 });
+  const secret = process.env.CRON_SECRET;
+  await fetch(`${url}/api/cron/release`, {
+    headers: secret ? { authorization: `Bearer ${secret}` } : {},
+  });
+  return new Response("ok");
+};
+
+export const config = {
+  schedule: "@hourly",
+};

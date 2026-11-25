@@ -1,0 +1,4 @@
+stem,type,subject,topic,difficulty,points,option_a,option_b,option_c,option_d,correct,accepted,pairs,explanation,media_url,media_alt
+The capital of Ethiopia is Addis Ababa.,true_false,Geography,Ethiopia,easy,1,,,,,true,,,"Addis Ababa is the capital.",,
+Which of these are primary colours of light?,multiple,Physics,Waves,medium,1,Red,Green,Blue,Yellow,A|B|C,,,"Yellow is not a primary colour of light.",,
+12 times 5 equals,short,Aptitude,Arithmetic,easy,1,,,,,,,"60","12 × 5 = 60.",,

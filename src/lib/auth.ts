@@ -91,6 +91,7 @@ export async function authenticate(email: string, password: string) {
       ok: false as const,
       error: "unverified" as const,
       userId: String(row.id),
+      email: String(row.email),
       channel: row.verification_channel === "sms" ? "sms" as const : "email" as const,
       destination: row.verification_channel === "sms" ? String(row.phone || "") : String(row.email),
     };

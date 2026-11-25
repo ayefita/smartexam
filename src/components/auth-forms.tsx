@@ -47,23 +47,19 @@ export function LoginForm({ dict, next }: { dict: Dictionary; next?: string }) {
 
 export function RegisterForm({ dict, organizations }: { dict: Dictionary; organizations: Organization[] }) {
   const [state, action, pending] = useActionState(registerAction, { error: "" });
-  const [channel, setChannel] = useState<"email" | "sms">("email");
   return (
     <form action={action} className="grid gap-4">
+      <input type="hidden" name="channel" value="email" />
       <Notice error text={state.error ? dict.errors[state.error as keyof typeof dict.errors] || dict.errors.generic : ""} />
       <Field label={dict.auth.fullName}><Input name="fullName" required autoComplete="name" className="h-11" /></Field>
       <Field label={dict.common.email}><Input name="email" type="email" required autoComplete="email" className="h-11" /></Field>
-      <Field label={dict.common.phone} hint={dict.errors.phone}><Input name="phone" inputMode="tel" autoComplete="tel" placeholder="+251 9xx xxx xxx" className="h-11" required={channel === "sms"} /></Field>
+      <Field label={dict.auth.phoneOptional} hint={dict.errors.phone}><Input name="phone" inputMode="tel" autoComplete="tel" placeholder="+251 9xx xxx xxx" className="h-11" /></Field>
       <Field label={dict.auth.organization}>
         <select name="organizationId" required className="h-11 w-full rounded-lg border border-input bg-card px-3 text-sm">
           {organizations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
         </select>
       </Field>
-      <fieldset className="grid gap-2">
-        <legend className="text-sm font-medium">{dict.auth.channel}</legend>
-        <label className="flex items-center gap-2 text-sm"><input type="radio" name="channel" value="email" checked={channel === "email"} onChange={() => setChannel("email")} /> {dict.auth.channelEmail}</label>
-        <label className="flex items-center gap-2 text-sm"><input type="radio" name="channel" value="sms" checked={channel === "sms"} onChange={() => setChannel("sms")} /> {dict.auth.channelSms}</label>
-      </fieldset>
+      <p className="text-sm text-muted-foreground">{dict.auth.channelEmailOnly}</p>
       <Field label={dict.auth.password}><Input name="password" type="password" required minLength={8} autoComplete="new-password" className="h-11" /></Field>
       <Field label={dict.auth.confirmPassword}><Input name="confirm" type="password" required minLength={8} autoComplete="new-password" className="h-11" /></Field>
       <Button type="submit" className="h-11" disabled={pending}>{dict.auth.register}</Button>
@@ -78,7 +74,7 @@ export function ForgotForm({ dict }: { dict: Dictionary }) {
     <form action={action} className="grid gap-4">
       <Notice error text={state.error ? dict.errors[state.error as keyof typeof dict.errors] || dict.errors.generic : ""} />
       {state.info ? <Notice text={dict.auth.forgotLead} /> : null}
-      <Field label={`${dict.common.email} / ${dict.common.phone}`}><Input name="identifier" required autoComplete="username" className="h-11" /></Field>
+      <Field label={dict.common.email}><Input name="identifier" type="email" required autoComplete="username" className="h-11" /></Field>
       <Button type="submit" className="h-11" disabled={pending}>{dict.auth.sendCode}</Button>
     </form>
   );

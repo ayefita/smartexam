@@ -33,7 +33,7 @@ An hourly Netlify scheduled function calls `/api/cron/release` so emails go out 
 
 ## Accounts and one-time codes
 
-Candidate self-registration asks for email **or** phone. The account is created **inactive** until the 6-digit code is entered. The same code resets a password.
+Candidate self-registration verifies by **email**. The account is created **inactive** until the 6-digit code sent to that address is entered. The same code, sent by email, resets a password. A phone number can still be saved on the profile, but codes are only offered by phone when an SMS provider is configured (see [SMS](#sms)); without one, the server rejects the phone channel with a clear message.
 
 - Codes expire after 10 minutes (`OTP_TTL_MINUTES`).
 - Five wrong attempts lock that code (`OTP_MAX_ATTEMPTS`).

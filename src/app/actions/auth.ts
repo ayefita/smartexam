@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { authenticate, clearOtpCookie, clearSession, readOtpCookie, setLocaleCookie, setOtpCookie, setSession } from "@/lib/auth";
 import { query } from "@/lib/db";
+import { smsEnabled } from "@/lib/messaging";
 import { safeNext } from "@/lib/format";
 import { issueOtp, latestOpenOtp, readOtp, registerCandidateAccount, requestPasswordReset, verifyOtp, activateUser, completePasswordReset } from "@/lib/otp";
 
@@ -10,11 +11,12 @@ export async function loginAction(_prev: { error: string }, formData: FormData) 
   const result = await authenticate(String(formData.get("email") || ""), String(formData.get("password") || ""));
   if (result.ok) redirect(safeNext(String(formData.get("next") || "")));
   if (result.error === "unverified") {
-    const channel = result.channel === "sms" ? "sms" : "email";
+    // Without an SMS provider, phone-verified accounts get their code by email instead.
+    const channel = result.channel === "sms" && smsEnabled() ? "sms" : "email";
     const issued = await issueOtp({
       purpose: "register",
       channel,
-      destination: result.destination || "",
+      destination: channel === result.channel ? result.destination || "" : result.email || "",
       userId: result.userId || "",
     });
     const open = issued.ok ? issued : await latestOpenOtp(result.userId || "", "register");

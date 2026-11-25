@@ -1,7 +1,7 @@
 import { createHash, randomInt, timingSafeEqual } from "crypto";
 import { query } from "./db";
 import { bool, iso, num } from "./format";
-import { channelMode, sendEmail, sendSms } from "./messaging";
+import { channelMode, sendEmail, sendSms, smsEnabled } from "./messaging";
 import { hashPassword } from "./password";
 import { maskDestination, normalizeEthiopianPhone } from "./phone";
 
@@ -43,6 +43,7 @@ export async function issueOtp(input: {
   destination: string;
   userId: string;
 }) {
+  if (input.channel === "sms" && !smsEnabled()) return { ok: false as const, error: "sms_unavailable" };
   const latest = await query(
     `select created_at from verification_codes where destination = $1 and purpose = $2 order by created_at desc limit 1`,
     [input.destination, input.purpose],
@@ -156,6 +157,7 @@ export async function registerCandidateAccount(input: {
   if (!fullName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || input.password.length < 8) {
     return { ok: false as const, error: "validation" };
   }
+  if (input.channel === "sms" && !smsEnabled()) return { ok: false as const, error: "sms_unavailable" };
   if (input.channel === "sms" && !phone) return { ok: false as const, error: "phone" };
   if (input.phone.trim() && !phone) return { ok: false as const, error: "phone" };
   const org = await query(`select id from organizations where id = $1`, [input.organizationId]);
@@ -196,6 +198,7 @@ export async function requestPasswordReset(identifier: string) {
   const { classifyIdentifier } = await import("./phone");
   const parsed = classifyIdentifier(identifier);
   if (!parsed) return { ok: true as const, sent: false };
+  if (parsed.channel === "sms" && !smsEnabled()) return { ok: false as const, error: "sms_unavailable" };
   const rows = await query(
     `select id, email, phone, active from users where email = $1 or (phone <> '' and phone = $1) limit 1`,
     [parsed.destination],

@@ -17,6 +17,11 @@ function smsProvider(): "twilio" | "afromessage" | null {
   return null;
 }
 
+/** True when a real SMS provider is configured. Without one, codes are offered by email only. */
+export function smsEnabled() {
+  return smsProvider() !== null;
+}
+
 export function channelMode(channel: "email" | "sms"): DeliveryMode {
   const forced = (process.env.OTP_DELIVERY || "").toLowerCase();
   if (forced === "dev") return "dev";

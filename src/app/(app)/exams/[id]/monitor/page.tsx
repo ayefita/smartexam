@@ -22,8 +22,8 @@ export default async function MonitorPage({ params }: { params: Promise<{ id: st
         lede={exam.title}
         actions={<Button variant="outline" className="h-10" render={<Link href={`/exams/${exam.id}`} />}>{dict.nav.exams}</Button>}
       />
-      <p className="mb-4 max-w-2xl text-sm text-muted-foreground">{dict.features.monitorb}</p>
-      <LiveBoard examId={exam.id} initial={board?.sitting || []} labels={dict.monitor} />
+      <p className="mb-4 max-w-2xl text-sm text-muted-foreground">{dict.world.board.lead}</p>
+      <LiveBoard examId={exam.id} initial={board?.sitting || []} labels={dict.monitor} words={dict.world.board} tabLimit={board?.tabLimit || 0} />
     </div>
   );
 }

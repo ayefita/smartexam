@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -21,6 +21,9 @@ export function ExamPlayer({
   proctorFullscreen,
   questions,
   initialAnswers,
+  blockCopy = false,
+  tabLimit = 0,
+  tabSwitchCount = 0,
 }: {
   dict: Dictionary;
   attemptId: string;
@@ -31,6 +34,9 @@ export function ExamPlayer({
   proctorFullscreen: boolean;
   questions: PresentedQuestion[];
   initialAnswers: Record<string, Saved>;
+  blockCopy?: boolean;
+  tabLimit?: number;
+  tabSwitchCount?: number;
 }) {
   const router = useRouter();
   const storageKey = `smartexam-answers-${attemptId}`;
@@ -39,7 +45,11 @@ export function ExamPlayer({
   const [blocked, setBlocked] = useState(false);
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, Saved>>(initialAnswers);
-  const [sync, setSync] = useState<"saved" | "local" | "syncing">("saved");
+  // saved: the server has everything. saving: a save is on its way. offline: kept on this device, will retry.
+  const [sync, setSync] = useState<"saved" | "saving" | "offline">("saved");
+  const [deadline, setDeadline] = useState(deadlineAt);
+  const [tabs, setTabs] = useState(tabSwitchCount);
+  const [view, setView] = useState({ zoom: 1, contrast: false });
   const [left, setLeft] = useState(0);
   const [warnTab, setWarnTab] = useState(false);
   const [warnFs, setWarnFs] = useState(false);
@@ -49,8 +59,13 @@ export function ExamPlayer({
   const offset = useRef(new Date(serverNow).getTime() - Date.now());
   const answersRef = useRef(answers);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const timers = useRef<Record<string, number>>({});
   const submitting = useRef(false);
+  // Questions changed on this device but not yet confirmed by the server, with a change counter each.
+  const dirty = useRef<Map<string, number>>(new Map());
+  const inflight = useRef(false);
+  const failures = useRef(0);
+  const flushTimer = useRef(0);
+  const world = dict.world;
   answersRef.current = answers;
   const question = questions[index];
 
@@ -64,7 +79,8 @@ export function ExamPlayer({
     const raw = localStorage.getItem(storageKey);
     if (raw) {
       try {
-        const local = JSON.parse(raw) as { answers: Record<string, Saved>; at: number };
+        const local = JSON.parse(raw) as { answers: Record<string, Saved>; at: number; pending?: string[] };
+        for (const key of local.pending || []) dirty.current.set(key, (dirty.current.get(key) || 0) + 1);
         setAnswers((current) => {
           const next = { ...current };
           for (const [key, value] of Object.entries(local.answers || {})) {
@@ -77,29 +93,25 @@ export function ExamPlayer({
         // Ignore a damaged local copy.
       }
     }
-    void fetch(`/api/attempts/${attemptId}/claim`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tabId: id }),
-    })
-      .then((response) => response.json())
-      .then((body) => {
-        if (body?.error === "other_session") setBlocked(true);
-        if (body?.error === "already_submitted") router.push(`/results/${attemptId}`);
-      })
-      .catch(() => setSync("local"));
+    try {
+      const prefs = JSON.parse(localStorage.getItem("smartexam-view") || "{}") as { zoom?: number; contrast?: boolean };
+      setView({ zoom: Math.min(1.6, Math.max(1, Number(prefs.zoom) || 1)), contrast: Boolean(prefs.contrast) });
+    } catch {
+      // Default view.
+    }
+    void claim(id, false);
   }, [attemptId, router, storageKey, tabKey]);
 
   useEffect(() => {
     const tick = () => {
-      const remaining = new Date(deadlineAt).getTime() - (Date.now() + offset.current);
+      const remaining = new Date(deadline).getTime() - (Date.now() + offset.current);
       setLeft(remaining);
       if (remaining <= 0) void submit("timer");
     };
     tick();
     const id = window.setInterval(tick, 250);
     return () => window.clearInterval(id);
-  }, [deadlineAt]);
+  }, [deadline]);
 
   useEffect(() => {
     const onOnline = () => {
@@ -109,9 +121,10 @@ export function ExamPlayer({
     const onOffline = () => setOffline(true);
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
+    // Only retries what is still waiting; a student with nothing unsaved sends nothing here.
     const id = window.setInterval(() => {
-      if (navigator.onLine) void flush();
-    }, 8000);
+      if (dirty.current.size && !inflight.current) void flush();
+    }, 5000);
     return () => {
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
@@ -121,15 +134,27 @@ export function ExamPlayer({
 
   useEffect(() => {
     if (!tabId || blocked) return;
-    const beat = () => {
-      void fetch(`/api/attempts/${attemptId}/heartbeat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tabId }),
-      }).catch(() => setSync("local"));
+    const beat = async () => {
+      try {
+        const response = await fetch(`/api/attempts/${attemptId}/heartbeat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tabId }),
+        });
+        const body = await response.json();
+        if (body?.error === "other_session") setBlocked(true);
+        if (body?.error === "already_submitted") router.push(`/results/${attemptId}`);
+        if (body?.ok) {
+          setOffline(false);
+          if (body.serverNow) offset.current = new Date(body.serverNow).getTime() - Date.now();
+          if (body.deadlineAt) setDeadline((value) => (value === body.deadlineAt ? value : body.deadlineAt));
+        }
+      } catch {
+        setOffline(true);
+      }
     };
-    beat();
-    const id = window.setInterval(beat, 8000);
+    void beat();
+    const id = window.setInterval(() => void beat(), 15000);
     return () => window.clearInterval(id);
   }, [attemptId, blocked, tabId]);
 
@@ -150,18 +175,38 @@ export function ExamPlayer({
     const onHide = () => {
       if (document.visibilityState === "hidden") {
         setWarnTab(true);
-        void postProctor("tab_switch");
         void flush();
+        void postProctor("tab_switch").then((body) => {
+          if (typeof body?.tabSwitches === "number") setTabs(body.tabSwitches);
+          if (body?.autoSubmitted) router.push(`/results/${attemptId}`);
+        });
       }
     };
-    const onPaste = () => void postProctor("paste");
+    const onPaste = (event: ClipboardEvent) => {
+      if (blockCopy) event.preventDefault();
+      void postProctor("paste");
+    };
+    const onCopy = (event: Event) => {
+      if (!blockCopy) return;
+      event.preventDefault();
+      void postProctor("copy_blocked");
+    };
+    const onMenu = (event: Event) => {
+      if (blockCopy) event.preventDefault();
+    };
     document.addEventListener("visibilitychange", onHide);
     document.addEventListener("paste", onPaste);
+    document.addEventListener("copy", onCopy);
+    document.addEventListener("cut", onCopy);
+    document.addEventListener("contextmenu", onMenu);
     return () => {
       document.removeEventListener("visibilitychange", onHide);
       document.removeEventListener("paste", onPaste);
+      document.removeEventListener("copy", onCopy);
+      document.removeEventListener("cut", onCopy);
+      document.removeEventListener("contextmenu", onMenu);
     };
-  }, [blocked, tabId]);
+  }, [blocked, tabId, blockCopy]);
 
   useEffect(() => {
     if (!proctorWebcam || blocked || !tabId) return;
@@ -203,60 +248,114 @@ export function ExamPlayer({
   }
 
   function persist(next: Record<string, Saved>) {
-    localStorage.setItem(storageKey, JSON.stringify({ answers: next, at: Date.now() }));
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ answers: next, at: Date.now(), pending: [...dirty.current.keys()] }));
+    } catch {
+      // Storage full or blocked: the server copy still works.
+    }
+  }
+
+  async function claim(id: string, takeover: boolean) {
+    try {
+      const response = await fetch(`/api/attempts/${attemptId}/claim`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tabId: id, takeover }),
+      });
+      const body = await response.json();
+      if (body?.error === "other_session") setBlocked(true);
+      if (body?.error === "already_submitted") router.push(`/results/${attemptId}`);
+      if (body?.ok) {
+        setBlocked(false);
+        if (dirty.current.size) void flush(id);
+      }
+    } catch {
+      setOffline(true);
+      if (dirty.current.size) setSync("offline");
+    }
   }
 
   function update(patch: Partial<Saved>) {
     if (!question) return;
     const next = { ...answersRef.current, [question.id]: { ...current(), ...patch } };
+    dirty.current.set(question.id, (dirty.current.get(question.id) || 0) + 1);
+    answersRef.current = next;
     setAnswers(next);
     persist(next);
-    setSync("local");
-    window.clearTimeout(timers.current[question.id]);
-    timers.current[question.id] = window.setTimeout(() => void push(question.id), 500);
+    setSync(navigator.onLine ? "saving" : "offline");
+    window.clearTimeout(flushTimer.current);
+    flushTimer.current = window.setTimeout(() => void flush(), 600);
   }
 
-  async function push(questionId: string) {
-    if (!tabId) return;
-    const answer = answersRef.current[questionId] || current(questionId);
-    setSync("syncing");
+  /** Sends every unsaved answer in one request. Returns true when nothing is left waiting. */
+  async function flush(id = tabId): Promise<boolean> {
+    if (!id || inflight.current) return dirty.current.size === 0;
+    if (!dirty.current.size) {
+      setSync("saved");
+      return true;
+    }
+    inflight.current = true;
+    const batch = new Map(dirty.current);
+    const payload = [...batch.keys()].map((questionId) => {
+      const answer = answersRef.current[questionId] || current(questionId);
+      return { questionId, selected: answer.selected, text: answer.text, matching: answer.matching, flagged: answer.flagged };
+    });
+    setSync("saving");
     try {
-      const response = await fetch(`/api/attempts/${attemptId}/answer`, {
+      const response = await fetch(`/api/attempts/${attemptId}/answers`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tabId, questionId, selected: answer.selected, text: answer.text, matching: answer.matching, flagged: answer.flagged }),
+        body: JSON.stringify({ tabId: id, answers: payload }),
       });
       const body = await response.json();
       if (body?.error === "expired" || body?.error === "already_submitted") {
         router.push(`/results/${attemptId}`);
-        return;
+        return true;
       }
       if (body?.error === "other_session") {
         setBlocked(true);
-        return;
+        return false;
       }
-      if (!response.ok) throw new Error("save");
-      setSync("saved");
+      if (!response.ok || !body?.ok) throw new Error("save");
+      // Drop only answers that did not change again while this request was on its way.
+      for (const [questionId, version] of batch) {
+        if (dirty.current.get(questionId) === version) dirty.current.delete(questionId);
+      }
+      persist(answersRef.current);
+      failures.current = 0;
+      setOffline(false);
+      setSync(dirty.current.size ? "saving" : "saved");
+      if (dirty.current.size) {
+        window.clearTimeout(flushTimer.current);
+        flushTimer.current = window.setTimeout(() => void flush(), 300);
+      }
+      return dirty.current.size === 0;
     } catch {
-      setSync("local");
-      setOffline(!navigator.onLine);
+      failures.current += 1;
+      setSync("offline");
+      setOffline(!navigator.onLine || failures.current > 1);
+      // Back off gently (2s, 4s, 8s... up to 30s) so 400 phones do not hammer a busy server.
+      const wait = Math.min(30_000, 1000 * 2 ** Math.min(failures.current, 5)) + Math.random() * 1000;
+      window.clearTimeout(flushTimer.current);
+      flushTimer.current = window.setTimeout(() => void flush(), wait);
+      return false;
+    } finally {
+      inflight.current = false;
     }
   }
 
-  async function flush() {
-    await Promise.all(questions.map((item) => push(item.id)));
-  }
-
-  async function postProctor(kind: string, snapshot = "") {
-    if (!tabId) return;
+  async function postProctor(kind: string, snapshot = ""): Promise<{ tabSwitches?: number; autoSubmitted?: boolean } | null> {
+    if (!tabId) return null;
     try {
-      await fetch(`/api/attempts/${attemptId}/proctor`, {
+      const response = await fetch(`/api/attempts/${attemptId}/proctor`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tabId, kind, snapshot }),
       });
+      return await response.json();
     } catch {
       // A missed proctor ping should not block the exam.
+      return null;
     }
   }
 
@@ -294,7 +393,12 @@ export function ExamPlayer({
     if (submitting.current) return;
     submitting.current = true;
     setConfirm(false);
-    await flush();
+    // Try a few times to get every answer to the server before handing in.
+    for (let tries = 0; tries < 4; tries += 1) {
+      while (inflight.current) await new Promise((resolve) => window.setTimeout(resolve, 150));
+      if (await flush()) break;
+      await new Promise((resolve) => window.setTimeout(resolve, 1500));
+    }
     try {
       await fetch(`/api/attempts/${attemptId}/submit`, {
         method: "POST",
@@ -316,11 +420,22 @@ export function ExamPlayer({
     }
   }
 
-  const syncLabel = sync === "saved" ? dict.player.saved : sync === "syncing" ? dict.player.syncing : dict.player.local;
+  const syncLabel = sync === "saved" ? world.saved : sync === "saving" ? world.saving : world.offlineRetry;
+  const changeView = (patch: Partial<typeof view>) => {
+    const next = { ...view, ...patch };
+    setView(next);
+    localStorage.setItem("smartexam-view", JSON.stringify(next));
+  };
   const low = left < 5 * 60 * 1000;
   const optionName = useMemo(() => `q-${question?.id}`, [question?.id]);
   if (blocked) {
-    return <p className="mx-auto max-w-lg rounded-xl bg-card p-6 text-sm" role="alert">{dict.player.blocked}</p>;
+    return (
+      <div className="mx-auto grid max-w-lg gap-3 rounded-xl bg-card p-6 text-sm ring-1 ring-foreground/10" role="alert">
+        <p>{dict.player.blocked}</p>
+        <p className="text-muted-foreground">{world.takeoverHint}</p>
+        <Button type="button" className="h-11 w-fit" onClick={() => void claim(tabId, true)}>{world.takeover}</Button>
+      </div>
+    );
   }
   if (!question) return null;
   const answer = current();
@@ -337,7 +452,10 @@ export function ExamPlayer({
   };
 
   return (
-    <div className="mx-auto grid w-full min-w-0 max-w-5xl gap-4">
+    <div
+      className={`mx-auto grid w-full min-w-0 max-w-5xl gap-4 ${view.contrast ? "exam-contrast" : ""} ${blockCopy ? "select-none" : ""}`}
+      style={view.zoom !== 1 ? ({ zoom: view.zoom } as CSSProperties) : undefined}
+    >
       <div className="sticky top-16 z-20 flex min-w-0 flex-nowrap items-center justify-between gap-3 border-b border-border bg-background/95 py-2 backdrop-blur md:static md:border-0 md:bg-transparent md:py-0">
         <div className="min-w-0">
           <p className="text-xs uppercase tracking-wide text-muted-foreground">{fill(dict.player.question, { n: index + 1, total: questions.length })}</p>
@@ -348,10 +466,30 @@ export function ExamPlayer({
           <p className="font-heading text-xl tabular-nums md:text-2xl">{formatClock(left)}</p>
         </div>
       </div>
-      <p className="sr-only" aria-live="polite">{syncLabel}{offline ? ` ${dict.player.offline}` : ""}</p>
-      {offline ? <p className="rounded-lg bg-[#f8efd4] px-3 py-2 text-sm text-[#6b5420]" role="status">{dict.player.offline}</p> : null}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p
+          className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ${sync === "saved" ? "bg-[#e5f6ee] text-[#0c5c40]" : sync === "saving" ? "bg-muted text-foreground" : "bg-[#f8efd4] text-[#6b5420]"}`}
+          role="status"
+          aria-live="polite"
+          data-sync={sync}
+        >
+          <span className={`size-2 rounded-full ${sync === "saved" ? "bg-[#0c7a52]" : sync === "saving" ? "animate-pulse bg-foreground/60" : "bg-[#b8860b]"}`} aria-hidden />
+          {syncLabel}
+        </p>
+        <div className="flex items-center gap-1" role="group" aria-label={world.view}>
+          <Button type="button" variant="outline" className="h-9 min-w-9 px-2" aria-label={world.smaller} disabled={view.zoom <= 1} onClick={() => changeView({ zoom: Math.max(1, Math.round((view.zoom - 0.15) * 100) / 100) })}>A−</Button>
+          <Button type="button" variant="outline" className="h-9 min-w-9 px-2 text-base" aria-label={world.bigger} disabled={view.zoom >= 1.6} onClick={() => changeView({ zoom: Math.min(1.6, Math.round((view.zoom + 0.15) * 100) / 100) })}>A+</Button>
+          <Button type="button" variant="outline" className="h-9 px-2" aria-pressed={view.contrast} onClick={() => changeView({ contrast: !view.contrast })}>{world.contrast}</Button>
+        </div>
+      </div>
+      {offline ? <p className="rounded-lg bg-[#f8efd4] px-3 py-2 text-sm text-[#6b5420]" role="status">{world.offlineHelp}</p> : null}
       {cameraFail ? <p className="rounded-lg bg-[#f8efd4] px-3 py-2 text-sm text-[#6b5420]" role="status">{dict.player.cameraFail}</p> : null}
-      {warnTab ? <p className="rounded-lg bg-[#fde8ec] px-3 py-2 text-sm text-[#8e1e32]" role="status">{dict.player.tabWarn}</p> : null}
+      {warnTab ? (
+        <p className="rounded-lg bg-[#fde8ec] px-3 py-2 text-sm text-[#8e1e32]" role="status">
+          {dict.player.tabWarn}
+          {tabLimit > 0 ? ` ${fill(world.tabCount, { n: tabs, max: tabLimit })}` : ""}
+        </p>
+      ) : null}
       <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
         <article className="rounded-2xl bg-card p-4 ring-1 ring-foreground/10 md:p-6">
           <p className="text-sm text-muted-foreground">{fill(dict.player.question, { n: index + 1, total: questions.length })} · {question.points} {dict.common.points}</p>
@@ -416,7 +554,6 @@ export function ExamPlayer({
             ) : (
               <Button type="button" className="h-11" onClick={() => setConfirm(true)}>{ux.review}</Button>
             )}
-            <span className="text-xs text-muted-foreground" aria-hidden>{syncLabel}</span>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">{dict.player.keys}</p>
         </article>

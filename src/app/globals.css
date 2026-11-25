@@ -141,3 +141,26 @@
     color: var(--primary);
   }
 }
+/* High-contrast mode in the exam player (student toggle). */
+.exam-contrast {
+  --background: #000;
+  --foreground: #fff;
+  --card: #000;
+  --card-foreground: #fff;
+  --popover: #000;
+  --popover-foreground: #fff;
+  --muted: #262626;
+  --muted-foreground: #f1f1f1;
+  --border: #fff;
+  --input: #fff;
+  --primary: #ffd60a;
+  --primary-foreground: #000;
+  --ring: #ffd60a;
+  background: #000;
+  color: #fff;
+  border-radius: 1rem;
+  padding: 0.75rem;
+}
+.exam-contrast .ring-foreground\/10 {
+  --tw-ring-color: #fff;
+}

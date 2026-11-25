@@ -24,6 +24,9 @@ export default async function AttemptPage({ params }: { params: Promise<{ attemp
       proctorFullscreen={payload.proctorFullscreen}
       questions={payload.questions}
       initialAnswers={payload.answers}
+      blockCopy={payload.blockCopy}
+      tabLimit={payload.tabLimit}
+      tabSwitchCount={payload.tabSwitchCount}
     />
   );
 }

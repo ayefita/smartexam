@@ -47,6 +47,8 @@ export function ExamEditor({
   const [difficulty, setDifficulty] = useState("");
   const [search, setSearch] = useState("");
   const [count, setCount] = useState(exam?.randomCount || 5);
+  const [levels, setLevels] = useState(exam?.blueprint || { easy: 0, medium: 0, hard: 0 });
+  const w = dict.world;
   const [shuffle, setShuffle] = useState(exam ? exam.shuffleQuestions || exam.shuffleOptions : true);
   const [orgId, setOrgId] = useState(exam?.organizationId || fixedOrg || organizations[0]?.id || "");
   const visibleBank = useMemo(() => bank.filter((item) => !item.organizationId || item.organizationId === orgId), [bank, orgId]);
@@ -60,6 +62,13 @@ export function ExamEditor({
     return selected.reduce((sum, id) => sum + (byId.get(id) ?? 0), 0);
   }, [bank, selected]);
   const suggestedEnd = addMinutes(startAt, duration + 15);
+  const available = useMemo(() => {
+    const byId = new Map(bank.map((item) => [item.id, item.difficulty]));
+    const tally = { easy: 0, medium: 0, hard: 0 } as Record<string, number>;
+    for (const id of selected) tally[byId.get(id) || "medium"] = (tally[byId.get(id) || "medium"] || 0) + 1;
+    return tally;
+  }, [bank, selected]);
+  const levelTotal = levels.easy + levels.medium + levels.hard;
 
   function computedRelease(nextEnd = endAt) {
     const iso = fromAddisInput(nextEnd);
@@ -209,7 +218,51 @@ export function ExamEditor({
               {mode === "random_fixed" ? <Button type="button" variant="outline" className="h-11" onClick={draw}>{dict.exams.draw}</Button> : null}
             </div>
           ) : null}
-          {mode === "random_each" ? <input type="hidden" name="randomCount" value={count} /> : <input type="hidden" name="randomCount" value={selected.length} />}
+          {mode === "random_each" && !locked ? (
+            <fieldset className="grid gap-2 rounded-xl bg-background p-3">
+              <legend className="px-1 text-sm font-medium">{w.byLevel}</legend>
+              <p className="text-xs text-muted-foreground">{w.byLevelHelp}</p>
+              <div className="flex flex-wrap gap-3">
+                {(["easy", "medium", "hard"] as const).map((level) => (
+                  <Field key={level} label={`${dict.difficulty[level]} (${fill(w.ofAvailable, { n: available[level] || 0 })})`}>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={available[level] || 0}
+                      name={`level_${level}`}
+                      value={levels[level]}
+                      onChange={(event) => setLevels({ ...levels, [level]: Math.max(0, Number(event.target.value) || 0) })}
+                      className="h-11 w-28"
+                    />
+                  </Field>
+                ))}
+              </div>
+              {levelTotal > 0 ? <p className="text-sm">{fill(w.levelTotal, { n: levelTotal })}</p> : null}
+            </fieldset>
+          ) : null}
+          {mode === "random_each" ? <input type="hidden" name="randomCount" value={levelTotal > 0 ? levelTotal : count} /> : <input type="hidden" name="randomCount" value={selected.length} />}
+          <fieldset className="grid gap-3 rounded-xl bg-background p-3">
+            <legend className="px-1 text-sm font-medium">{w.safety}</legend>
+            <Field label={w.accessCodeStaff}>
+              <Input name="accessCode" defaultValue={exam?.accessCode} maxLength={40} autoComplete="off" className="h-11 max-w-xs uppercase" placeholder="e.g. HALL7" />
+              <span className="text-xs text-muted-foreground">{w.accessCodeStaffHelp}</span>
+            </Field>
+            <label className="flex items-start gap-3 text-sm"><input type="checkbox" className={checkbox} name="blockCopy" defaultChecked={exam?.blockCopy} /> <span>{w.blockCopy}<span className="block text-xs text-muted-foreground">{w.blockCopyHelp}</span></span></label>
+            <Field label={w.tabLimit}>
+              <Input type="number" name="tabLimit" min={0} max={50} defaultValue={exam?.tabLimit ?? 0} className="h-11 w-28" />
+              <span className="text-xs text-muted-foreground">{w.tabLimitHelp}</span>
+            </Field>
+          </fieldset>
+          <Field label={w.negative}>
+            <NativeSelect name="negativeMark" defaultValue={String(exam?.negativeMark ?? 0)} disabled={locked}>
+              <option value="0">{w.negativeOff}</option>
+              <option value="0.25">{fill(w.negativeShare, { n: "¼" })}</option>
+              <option value="0.33">{fill(w.negativeShare, { n: "⅓" })}</option>
+              <option value="0.5">{fill(w.negativeShare, { n: "½" })}</option>
+              <option value="1">{fill(w.negativeShare, { n: "1" })}</option>
+            </NativeSelect>
+            <span className="text-xs text-muted-foreground">{w.negativeHelp}</span>
+          </Field>
           <label className="flex items-center gap-3 text-sm"><input type="checkbox" className={checkbox} name="proctorWebcam" defaultChecked={exam?.proctorWebcam} /> {t.webcam}</label>
           <label className="flex items-center gap-3 text-sm"><input type="checkbox" className={checkbox} name="proctorFullscreen" defaultChecked={exam?.proctorFullscreen ?? true} /> {t.fullscreen}</label>
           <Field label={t.status}>

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Notice, PageHeader } from "@/components/ui-app";
 import { requireUser } from "@/lib/auth";
 import { getExam, isAssigned } from "@/lib/domain";
-import { formatAddis } from "@/lib/format";
+import { formatAddis, formatBoth } from "@/lib/format";
 import { fill } from "@/lib/i18n";
 import { getDictionary } from "@/lib/locale";
 import { examWindow } from "@/lib/results";
@@ -28,8 +28,11 @@ export default async function TakePage({ params, searchParams }: { params: Promi
   const items = [
     fill(b.duration, { n: exam.durationMinutes }),
     total ? fill(b.questions, { n: total }) : "",
-    exam.startAt || exam.endAt ? fill(b.time, { start: formatAddis(exam.startAt, locale), end: `${formatAddis(exam.endAt, locale)} (${dict.zone})` }) : "",
+    exam.startAt || exam.endAt ? fill(b.time, { start: formatBoth(exam.startAt, locale), end: `${formatBoth(exam.endAt, locale)} (${dict.zone})` }) : "",
     fill(b.pass, { n: exam.passMark }),
+    exam.negativeMark > 0 ? fill(dict.world.negativeRule, { n: exam.negativeMark }) : "",
+    exam.blockCopy ? dict.world.copyRule : "",
+    exam.tabLimit > 0 ? fill(dict.world.tabRule, { n: exam.tabLimit }) : "",
     b.autosave,
     b.auto,
     b.stay,
@@ -58,6 +61,13 @@ export default async function TakePage({ params, searchParams }: { params: Promi
       {window === "open" ? (
         <form action={startExamAction} className="mt-5 grid gap-4">
           <input type="hidden" name="examId" value={exam.id} />
+          {exam.accessCode ? (
+            <label className="grid max-w-xs gap-1 text-base font-medium">
+              {dict.world.accessCode}
+              <input name="accessCode" required autoComplete="off" autoCapitalize="characters" className="h-12 rounded-lg border border-input bg-card px-3 text-lg tracking-widest" />
+              <span className="text-sm font-normal text-muted-foreground">{dict.world.accessCodeHelp}</span>
+            </label>
+          ) : null}
           {exam.proctorWebcam ? <label className="flex items-start gap-3 text-base"><input type="checkbox" name="consent" required className="mt-1 size-5 accent-[#0c5c40]" /> {b.consent}</label> : null}
           <Button type="submit" className="h-14 w-full text-lg sm:w-fit sm:px-10">{b.start}</Button>
         </form>

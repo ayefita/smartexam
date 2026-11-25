@@ -219,6 +219,15 @@ export async function saveExamAction(formData: FormData) {
     proctorWebcam: formData.get("proctorWebcam") === "on",
     proctorFullscreen: formData.get("proctorFullscreen") === "on",
     status: (String(formData.get("status") || "draft") as ExamStatus),
+    accessCode: String(formData.get("accessCode") || ""),
+    blockCopy: formData.get("blockCopy") === "on",
+    tabLimit: Number(formData.get("tabLimit") || 0),
+    negativeMark: Number(formData.get("negativeMark") || 0),
+    blueprint: {
+      easy: Number(formData.get("level_easy") || 0),
+      medium: Number(formData.get("level_medium") || 0),
+      hard: Number(formData.get("level_hard") || 0),
+    },
   };
   const result = await saveExam(actor, input);
   if (!result.ok) go(input.id ? `/exams/${input.id}` : "/exams/new", result.error);
@@ -403,7 +412,7 @@ export async function startExamAction(formData: FormData) {
   const examId = String(formData.get("examId") || "");
   const exam = await getExam(examId);
   if (exam?.proctorWebcam && formData.get("consent") !== "on") redirect(`/take/${examId}?error=consent`);
-  const result = await startAttempt(actor, examId);
+  const result = await startAttempt(actor, examId, String(formData.get("accessCode") || ""));
   if (!result.ok) redirect(`/take/${examId}?error=${result.error}`);
   redirect(`/attempt/${result.attemptId}`);
 }

@@ -27,6 +27,7 @@ import type {
   Actor,
   Answer,
   Attempt,
+  Blueprint,
   Category,
   Department,
   Difficulty,
@@ -121,6 +122,16 @@ function mapOrg(row: Record<string, unknown>): Organization {
   };
 }
 
+export function readBlueprint(value: unknown): Blueprint {
+  const raw = parseJson<Partial<Blueprint>>(value, {});
+  const clean = (n: unknown) => Math.max(0, Math.min(500, Math.floor(Number(n) || 0)));
+  return { easy: clean(raw.easy), medium: clean(raw.medium), hard: clean(raw.hard) };
+}
+
+export function blueprintTotal(blueprint: Blueprint) {
+  return blueprint.easy + blueprint.medium + blueprint.hard;
+}
+
 function mapExam(row: Record<string, unknown>): Exam {
   return {
     id: String(row.id),
@@ -149,6 +160,11 @@ function mapExam(row: Record<string, unknown>): Exam {
     randomCount: num(row.random_count),
     proctorWebcam: bool(row.proctor_webcam),
     proctorFullscreen: bool(row.proctor_fullscreen),
+    accessCode: String(row.access_code ?? ""),
+    blockCopy: bool(row.block_copy),
+    tabLimit: num(row.tab_limit),
+    negativeMark: num(row.negative_mark),
+    blueprint: readBlueprint(row.blueprint),
     status: row.status as ExamStatus,
     createdBy: row.created_by ? String(row.created_by) : null,
     createdAt: iso(row.created_at) || "",
@@ -863,6 +879,11 @@ export type ExamInput = {
   proctorWebcam: boolean;
   proctorFullscreen: boolean;
   status: ExamStatus;
+  accessCode?: string;
+  blockCopy?: boolean;
+  tabLimit?: number;
+  negativeMark?: number;
+  blueprint?: Blueprint;
 };
 
 export async function saveExam(actor: User, input: ExamInput): Promise<Ok<{ id: string }> | Fail> {
@@ -878,6 +899,18 @@ export async function saveExam(actor: User, input: ExamInput): Promise<Ok<{ id: 
   }
   const questionIds = [...new Set(input.questionIds.filter(Boolean))];
   if (input.status !== "draft" && questionIds.length < 1) return { ok: false, error: "validation" };
+  const blueprint = readBlueprint(input.blueprint);
+  if (input.selectionMode === "random_each" && blueprintTotal(blueprint) > 0) {
+    // "10 easy, 20 medium, 10 hard": every level must have enough questions in the chosen set.
+    const levels = questionIds.length
+      ? await query(`select difficulty, count(*)::int as n from questions where id = any($1::text[]) group by difficulty`, [questionIds])
+      : [];
+    const have = new Map(levels.map((row) => [String(row.difficulty), num(row.n)]));
+    for (const level of ["easy", "medium", "hard"] as const) {
+      if (blueprint[level] > (have.get(level) ?? 0)) return { ok: false, error: "blueprint_short" };
+    }
+    input.randomCount = blueprintTotal(blueprint);
+  }
   if (input.selectionMode === "random_each" && (input.randomCount < 1 || input.randomCount > questionIds.length)) {
     return { ok: false, error: "validation" };
   }
@@ -946,6 +979,22 @@ export async function saveExam(actor: User, input: ExamInput): Promise<Ok<{ id: 
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
         [...params, actor.id],
       );
+    }
+    const tabLimit = Math.max(0, Math.min(50, Math.floor(Number(input.tabLimit) || 0)));
+    const negativeMark = Math.max(0, Math.min(1, Number(input.negativeMark) || 0));
+    await q(`update exams set access_code = $1, block_copy = $2, tab_limit = $3 where id = $4`, [
+      (input.accessCode || "").trim().slice(0, 40),
+      Boolean(input.blockCopy),
+      tabLimit,
+      id,
+    ]);
+    // Marking rules and the paper recipe cannot change once students have started.
+    if (!locked) {
+      await q(`update exams set negative_mark = $1, blueprint = $2::jsonb where id = $3`, [
+        negativeMark,
+        JSON.stringify(input.selectionMode === "random_each" ? blueprint : { easy: 0, medium: 0, hard: 0 }),
+        id,
+      ]);
     }
     if (!locked) {
       await q(`delete from exam_questions where exam_id = $1`, [id]);
@@ -1146,7 +1195,7 @@ async function loadPaper(examId: string) {
   return links.map((question) => paperFromQuestion(question, question.points));
 }
 
-export async function startAttempt(actor: User, examId: string): Promise<Ok<{ attemptId: string; resumed: boolean }> | Fail> {
+export async function startAttempt(actor: User, examId: string, accessCode = ""): Promise<Ok<{ attemptId: string; resumed: boolean }> | Fail> {
   if (actor.role !== "candidate") return { ok: false, error: "forbidden" };
   const exam = await getExam(examId);
   if (!exam || exam.status !== "published") return { ok: false, error: "not_found" };
@@ -1155,10 +1204,20 @@ export async function startAttempt(actor: User, examId: string): Promise<Ok<{ at
   if (existingRows[0]?.status === "submitted") return { ok: false, error: "already_submitted" };
   if (existingRows[0]?.status === "in_progress") return { ok: true, attemptId: String(existingRows[0].id), resumed: true };
   if (examWindow(exam) !== "open") return { ok: false, error: "window" };
+  if (exam.accessCode && accessCode.trim().toUpperCase() !== exam.accessCode.trim().toUpperCase()) {
+    return { ok: false, error: "access_code" };
+  }
   const pool = await loadPaper(examId);
   if (!pool.length) return { ok: false, error: "validation" };
   let chosen = pool;
-  if (exam.selectionMode === "random_each") chosen = shuffle(pool).slice(0, Math.min(exam.randomCount || pool.length, pool.length));
+  if (exam.selectionMode === "random_each" && blueprintTotal(exam.blueprint) > 0) {
+    // Same number of easy, medium and hard questions for everyone, different questions per student.
+    chosen = shuffle(
+      (["easy", "medium", "hard"] as const).flatMap((level) =>
+        shuffle(pool.filter((question) => question.difficulty === level)).slice(0, exam.blueprint[level]),
+      ),
+    );
+  } else if (exam.selectionMode === "random_each") chosen = shuffle(pool).slice(0, Math.min(exam.randomCount || pool.length, pool.length));
   else if (exam.shuffleQuestions) chosen = shuffle(pool);
   const optionOrders: Record<string, string[]> = {};
   const matchingOrders: Record<string, string[]> = {};
@@ -1170,10 +1229,13 @@ export async function startAttempt(actor: User, examId: string): Promise<Ok<{ at
   }
   let deadline = Date.now() + exam.durationMinutes * 60_000;
   if (exam.endAt) deadline = Math.min(deadline, new Date(exam.endAt).getTime());
+  const accommodation = await query(`select extra_minutes from exam_accommodations where exam_id = $1 and user_id = $2`, [examId, actor.id]);
+  const extra = num(accommodation[0]?.extra_minutes);
+  deadline += extra * 60_000;
   const id = crypto.randomUUID();
   await query(
-    `insert into attempts (id, exam_id, candidate_id, status, grading_status, deadline_at, question_order, option_orders, matching_orders, paper, last_seen_at)
-     values ($1,$2,$3,'in_progress','auto',$4,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb, now())`,
+    `insert into attempts (id, exam_id, candidate_id, status, grading_status, deadline_at, question_order, option_orders, matching_orders, paper, last_seen_at, extra_minutes)
+     values ($1,$2,$3,'in_progress','auto',$4,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb, now(), $9)`,
     [
       id,
       examId,
@@ -1183,6 +1245,7 @@ export async function startAttempt(actor: User, examId: string): Promise<Ok<{ at
       JSON.stringify(optionOrders),
       JSON.stringify(matchingOrders),
       JSON.stringify(chosen),
+      extra,
     ],
   );
   await audit(actor, "start", "attempt", id, exam.title, exam.organizationId);
@@ -1220,6 +1283,11 @@ export async function playerPayload(actor: User, attemptId: string) {
   const attempt = mapAttempt(rows[0], true);
   if (attempt.candidateId !== actor.id) return { ok: false as const, error: "forbidden" };
   if (attempt.status === "submitted") return { ok: false as const, error: "already_submitted", attemptId };
+  if (new Date(attempt.deadlineAt).getTime() <= Date.now()) {
+    // Time ran out while the browser was closed: the server submits for the student.
+    await finishAttempt(attemptId, "timer");
+    return { ok: false as const, error: "already_submitted", attemptId };
+  }
   const exam = await getExam(attempt.examId);
   if (!exam) return { ok: false as const, error: "not_found" };
   const byId = new Map(attempt.paper.map((question) => [question.id, question]));
@@ -1241,6 +1309,8 @@ export async function playerPayload(actor: User, attemptId: string) {
     serverNow: new Date().toISOString(),
     proctorWebcam: exam.proctorWebcam,
     proctorFullscreen: exam.proctorFullscreen,
+    blockCopy: exam.blockCopy,
+    tabLimit: exam.tabLimit,
     questions,
     answers,
     tabSwitchCount: attempt.tabSwitchCount,
@@ -1263,18 +1333,29 @@ async function holdSession(attemptId: string, tabId: string) {
   return rows.length > 0;
 }
 
-export async function claimAttempt(actor: User, attemptId: string, tabId: string): Promise<Ok | Fail> {
+export async function claimAttempt(actor: User, attemptId: string, tabId: string, takeover = false): Promise<Ok | Fail> {
   const attempt = await ownLiveAttempt(actor, attemptId);
   if (!attempt) return { ok: false, error: "not_found" };
   if (attempt.status !== "in_progress") return { ok: false, error: "already_submitted" };
-  if (!(await holdSession(attemptId, tabId))) return { ok: false, error: "other_session" };
+  if (await holdSession(attemptId, tabId)) return { ok: true };
+  if (!takeover || !tabId) return { ok: false, error: "other_session" };
+  // One device at a time: the new device wins, the old one is locked out at its next save, and we log it.
+  await query(`update attempts set session_token = $1 where id = $2 and status = 'in_progress'`, [tabId, attemptId]);
+  await query(`insert into proctor_events (id, attempt_id, kind, detail) values ($1,$2,'session_takeover','Continued on another device or tab')`, [
+    crypto.randomUUID(),
+    attemptId,
+  ]);
+  await query(`update attempts set suspicious_count = suspicious_count + 1 where id = $1`, [attemptId]);
   return { ok: true };
 }
 
-export async function saveAnswer(
+export type AnswerInput = { questionId: string; selected: string[]; text: string; matching: Record<string, string>; flagged: boolean };
+
+/** Saves several answers in one round trip. The player sends whatever changed since the last save. */
+export async function saveAnswers(
   actor: User,
-  input: { attemptId: string; tabId: string; questionId: string; selected: string[]; text: string; matching: Record<string, string>; flagged: boolean },
-): Promise<Ok<{ savedAt: string }> | Fail> {
+  input: { attemptId: string; tabId: string; answers: AnswerInput[] },
+): Promise<Ok<{ savedAt: string; saved: string[] }> | Fail> {
   const attempt = await ownLiveAttempt(actor, input.attemptId);
   if (!attempt || attempt.status !== "in_progress") return { ok: false, error: "already_submitted" };
   if (new Date(attempt.deadlineAt).getTime() <= Date.now()) {
@@ -1282,19 +1363,29 @@ export async function saveAnswer(
     return { ok: false, error: "expired" };
   }
   if (!(await holdSession(input.attemptId, input.tabId))) return { ok: false, error: "other_session" };
-  if (!attempt.paper.some((question) => question.id === input.questionId)) return { ok: false, error: "validation" };
-  const selected = [...new Set(input.selected.map(String))].slice(0, 12);
-  const text = input.text.slice(0, 20000);
+  const onPaper = new Set(attempt.paper.map((question) => question.id));
+  const rows = input.answers
+    .filter((answer) => onPaper.has(answer.questionId))
+    .slice(0, 300)
+    .map((answer) => ({
+      qid: answer.questionId,
+      sel: [...new Set((answer.selected || []).map(String))].slice(0, 12),
+      txt: String(answer.text || "").slice(0, 20000),
+      mat: answer.matching && typeof answer.matching === "object" ? answer.matching : {},
+      flg: Boolean(answer.flagged),
+    }));
+  if (!rows.length) return input.answers.length ? { ok: false, error: "validation" } : { ok: true, savedAt: new Date().toISOString(), saved: [] };
   await query(
     `insert into answers (attempt_id, question_id, selected_option_ids, text_answer, matching, flagged, updated_at)
-     values ($1,$2,$3::jsonb,$4,$5::jsonb,$6, now())
+     select $1, r.qid, r.sel, r.txt, r.mat, r.flg, now()
+     from jsonb_to_recordset($2::jsonb) as r(qid text, sel jsonb, txt text, mat jsonb, flg boolean)
      on conflict (attempt_id, question_id) do update set
        selected_option_ids = excluded.selected_option_ids,
        text_answer = excluded.text_answer,
        matching = excluded.matching,
        flagged = excluded.flagged,
        updated_at = now()`,
-    [input.attemptId, input.questionId, JSON.stringify(selected), text, JSON.stringify(input.matching || {}), input.flagged],
+    [input.attemptId, JSON.stringify(rows)],
   );
   await query(
     `update attempts set last_seen_at = now(), answered_count = (
@@ -1304,13 +1395,22 @@ export async function saveAnswer(
     ) where id = $1`,
     [input.attemptId],
   );
-  return { ok: true, savedAt: new Date().toISOString() };
+  return { ok: true, savedAt: new Date().toISOString(), saved: rows.map((row) => row.qid) };
+}
+
+export async function saveAnswer(
+  actor: User,
+  input: { attemptId: string; tabId: string } & AnswerInput,
+): Promise<Ok<{ savedAt: string }> | Fail> {
+  const result = await saveAnswers(actor, { attemptId: input.attemptId, tabId: input.tabId, answers: [input] });
+  if (!result.ok) return result;
+  return { ok: true, savedAt: result.savedAt };
 }
 
 export async function logProctor(
   actor: User,
   input: { attemptId: string; tabId: string; kind: string; detail?: string; snapshot?: string },
-): Promise<Ok<{ suspicious: number; tabSwitches: number; risk: number }> | Fail> {
+): Promise<Ok<{ suspicious: number; tabSwitches: number; risk: number; tabLimit: number; autoSubmitted: boolean }> | Fail> {
   const attempt = await ownLiveAttempt(actor, input.attemptId);
   if (!attempt || attempt.status !== "in_progress") return { ok: false, error: "already_submitted" };
   if (!(await holdSession(input.attemptId, input.tabId))) return { ok: false, error: "other_session" };
@@ -1333,8 +1433,23 @@ export async function logProctor(
     await query(`update attempts set suspicious_count = suspicious_count + 1 where id = $1`, [input.attemptId]);
   }
   await refreshRisk(input.attemptId);
-  const fresh = await query(`select tab_switch_count, suspicious_count, risk_score from attempts where id = $1`, [input.attemptId]);
-  return { ok: true, suspicious: num(fresh[0]?.suspicious_count), tabSwitches: num(fresh[0]?.tab_switch_count), risk: num(fresh[0]?.risk_score) };
+  const fresh = await query(
+    `select a.tab_switch_count, a.suspicious_count, a.risk_score, e.tab_limit
+     from attempts a join exams e on e.id = a.exam_id where a.id = $1`,
+    [input.attemptId],
+  );
+  const tabSwitches = num(fresh[0]?.tab_switch_count);
+  const tabLimit = num(fresh[0]?.tab_limit);
+  let autoSubmitted = false;
+  if (kind === "tab_switch" && tabLimit > 0 && tabSwitches >= tabLimit) {
+    await query(`insert into proctor_events (id, attempt_id, kind, detail) values ($1,$2,'auto_submit','Tab switch limit reached')`, [
+      crypto.randomUUID(),
+      input.attemptId,
+    ]);
+    await finishAttempt(input.attemptId, "tab_limit");
+    autoSubmitted = true;
+  }
+  return { ok: true, suspicious: num(fresh[0]?.suspicious_count), tabSwitches, risk: num(fresh[0]?.risk_score), tabLimit, autoSubmitted };
 }
 
 async function finishAttempt(attemptId: string, reason: string) {
@@ -1352,71 +1467,199 @@ async function finishAttempt(attemptId: string, reason: string) {
 }
 
 export async function heartbeat(actor: User, attemptId: string, tabId: string) {
-  const attempt = await ownLiveAttempt(actor, attemptId);
-  if (!attempt || attempt.status !== "in_progress") return { ok: false as const, error: "already_submitted" };
-  if (!(await holdSession(attemptId, tabId))) return { ok: false as const, error: "other_session" };
-  const seen = await query(`select last_seen_at from attempts where id = $1`, [attemptId]);
-  const last = seen[0]?.last_seen_at ? new Date(String(seen[0].last_seen_at)).getTime() : 0;
+  // One statement: keep the session, stamp last seen, and hand back the previous stamp to spot gaps.
+  const rows = await query(
+    `with prev as (select last_seen_at from attempts where id = $2)
+     update attempts set session_token = $1, last_seen_at = now()
+     where id = $2 and candidate_id = $3 and status = 'in_progress' and deadline_at > now()
+       and (session_token is null or session_token = $1)
+     returning (select last_seen_at from prev) as prev_seen, answered_count, deadline_at`,
+    [tabId, attemptId, actor.id],
+  );
+  if (!rows[0]) {
+    const attempt = await ownLiveAttempt(actor, attemptId);
+    if (!attempt || attempt.status !== "in_progress") return { ok: false as const, error: "already_submitted" };
+    if (new Date(attempt.deadlineAt).getTime() <= Date.now()) {
+      await finishAttempt(attemptId, "timer");
+      return { ok: false as const, error: "already_submitted" };
+    }
+    return { ok: false as const, error: "other_session" };
+  }
+  const last = rows[0].prev_seen ? new Date(String(rows[0].prev_seen)).getTime() : 0;
   if (last && Date.now() - last > 45_000) {
     await query(`insert into proctor_events (id, attempt_id, kind, detail) values ($1,$2,'disconnect','Heartbeat gap')`, [crypto.randomUUID(), attemptId]);
     await query(`update attempts set disconnect_count = disconnect_count + 1 where id = $1`, [attemptId]);
     await refreshRisk(attemptId);
   }
-  const answered = await query(
-    `select count(*) as n from answers where attempt_id = $1 and (
-      jsonb_array_length(selected_option_ids) > 0 or length(text_answer) > 0 or matching::text not in ('{}','null')
-    )`,
-    [attemptId],
-  );
-  await query(`update attempts set last_seen_at = now(), answered_count = $2 where id = $1`, [attemptId, num(answered[0]?.n)]);
-  return { ok: true as const, answered: num(answered[0]?.n) };
+  // The deadline can move (extra time from the invigilator), so the player re-reads it here.
+  return { ok: true as const, answered: num(rows[0].answered_count), deadlineAt: iso(rows[0].deadline_at), serverNow: new Date().toISOString() };
 }
 
 export async function liveBoard(actor: User, examId: string) {
   const exam = await getExam(examId);
   if (!exam || !managesOrg(actor, exam.organizationId)) return null;
+  // Risk is refreshed whenever an event arrives, so the board only reads it.
   const rows = await query(
-    `select a.id, a.status, a.deadline_at, a.last_seen_at, a.risk_score,
-            (select count(*) from answers ans where ans.attempt_id = a.id and (
-              jsonb_array_length(ans.selected_option_ids) > 0 or length(ans.text_answer) > 0 or ans.matching::text not in ('{}','null')
-            )) as answered_count, a.question_order,
-            a.disconnect_count, a.tab_switch_count, a.started_at, a.submitted_at, u.full_name
+    `select a.id, a.candidate_id, a.status, a.deadline_at, a.last_seen_at, a.risk_score, a.answered_count, a.question_order,
+            a.disconnect_count, a.tab_switch_count, a.started_at, a.submitted_at, a.extra_minutes, a.percentage, u.full_name
      from attempts a join users u on u.id = a.candidate_id
      where a.exam_id = $1
      order by a.status, u.full_name`,
     [examId],
   );
-  for (const row of rows) await refreshRisk(String(row.id));
-  const scored = await query(
-    `select a.id, a.risk_score from attempts a where a.exam_id = $1`,
-    [examId],
-  );
-  const risks = new Map(scored.map((row) => [String(row.id), num(row.risk_score)]));
+  const started = new Set(rows.map((row) => String(row.candidate_id)));
+  const assigned = await assignedCandidates(examId);
+  const accommodations = await query(`select user_id, extra_minutes from exam_accommodations where exam_id = $1`, [examId]);
+  const extraFor = new Map(accommodations.map((row) => [String(row.user_id), num(row.extra_minutes)]));
   const now = Date.now();
+  const sitting = rows.map((row) => {
+    const last = row.last_seen_at ? new Date(String(row.last_seen_at)).getTime() : 0;
+    const inProgress = row.status === "in_progress";
+    const online = inProgress && last > 0 && now - last < 25_000;
+    const total = parseJson<string[]>(row.question_order, []).length;
+    const deadline = new Date(String(row.deadline_at)).getTime();
+    return {
+      id: String(row.id),
+      candidateId: String(row.candidate_id),
+      name: String(row.full_name),
+      status: String(row.status),
+      online,
+      disconnected: inProgress && !online,
+      answered: num(row.answered_count),
+      total,
+      secondsLeft: inProgress ? Math.max(0, Math.round((deadline - now) / 1000)) : 0,
+      disconnects: num(row.disconnect_count),
+      risk: num(row.risk_score),
+      tabSwitches: num(row.tab_switch_count),
+      extraMinutes: num(row.extra_minutes),
+      percentage: row.percentage == null ? null : num(row.percentage),
+      lastSeen: iso(row.last_seen_at),
+    };
+  });
+  const waiting = assigned
+    .filter((person) => !started.has(person.id))
+    .map((person) => ({
+      id: "",
+      candidateId: person.id,
+      name: person.fullName,
+      status: "not_started",
+      online: false,
+      disconnected: false,
+      answered: 0,
+      total: 0,
+      secondsLeft: 0,
+      disconnects: 0,
+      risk: 0,
+      tabSwitches: 0,
+      extraMinutes: extraFor.get(person.id) ?? 0,
+      percentage: null,
+      lastSeen: null,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return { examTitle: exam.title, serverNow: new Date(now).toISOString(), tabLimit: exam.tabLimit, sitting: [...sitting, ...waiting] };
+}
+
+async function staffAttempt(actor: User, attemptId: string) {
+  const rows = await query(
+    `select a.id, a.status, a.exam_id, a.deadline_at, e.organization_id, e.title, u.full_name
+     from attempts a join exams e on e.id = a.exam_id join users u on u.id = a.candidate_id where a.id = $1`,
+    [attemptId],
+  );
+  if (!rows[0] || !managesOrg(actor, String(rows[0].organization_id))) return null;
+  return rows[0];
+}
+
+/** Invigilator: give one student more minutes while they are writing. */
+export async function addExtraTime(actor: User, attemptId: string, minutes: number): Promise<Ok | Fail> {
+  const row = await staffAttempt(actor, attemptId);
+  if (!row) return { ok: false, error: "forbidden" };
+  const extra = Math.floor(minutes);
+  if (!(extra >= 1 && extra <= 240)) return { ok: false, error: "validation" };
+  const updated = await query(
+    `update attempts set deadline_at = greatest(deadline_at, now()) + ($2 || ' minutes')::interval, extra_minutes = extra_minutes + $2::int
+     where id = $1 and status = 'in_progress' returning id`,
+    [attemptId, String(extra)],
+  );
+  if (!updated.length) return { ok: false, error: "already_submitted" };
+  await query(`insert into proctor_events (id, attempt_id, kind, detail) values ($1,$2,'extra_time',$3)`, [crypto.randomUUID(), attemptId, `+${extra} min by ${actor.fullName}`]);
+  await audit(actor, "extra_time", "attempt", attemptId, `${row.full_name} +${extra} min`, String(row.organization_id));
+  return { ok: true };
+}
+
+/** Invigilator: hand in a student's exam now, with what they have saved. */
+export async function forceSubmit(actor: User, attemptId: string): Promise<Ok | Fail> {
+  const row = await staffAttempt(actor, attemptId);
+  if (!row) return { ok: false, error: "forbidden" };
+  if (row.status !== "in_progress") return { ok: false, error: "already_submitted" };
+  await query(`insert into proctor_events (id, attempt_id, kind, detail) values ($1,$2,'force_submit',$3)`, [crypto.randomUUID(), attemptId, `By ${actor.fullName}`]);
+  await finishAttempt(attemptId, "staff");
+  await audit(actor, "force_submit", "attempt", attemptId, String(row.full_name), String(row.organization_id));
+  return { ok: true };
+}
+
+/** Invigilator: let a student continue a submitted exam (for example after a power cut). */
+export async function reopenAttempt(actor: User, attemptId: string, minutes: number): Promise<Ok | Fail> {
+  const row = await staffAttempt(actor, attemptId);
+  if (!row) return { ok: false, error: "forbidden" };
+  const extra = Math.floor(minutes);
+  if (!(extra >= 1 && extra <= 240)) return { ok: false, error: "validation" };
+  const updated = await query(
+    `update attempts set status = 'in_progress', grading_status = 'auto', submitted_at = null, submit_reason = '',
+       score = null, percentage = null, passed = null, session_token = null, result_emailed_at = null,
+       deadline_at = now() + ($2 || ' minutes')::interval
+     where id = $1 and status = 'submitted' returning id`,
+    [attemptId, String(extra)],
+  );
+  if (!updated.length) return { ok: false, error: "validation" };
+  await query(`insert into proctor_events (id, attempt_id, kind, detail) values ($1,$2,'reopened',$3)`, [crypto.randomUUID(), attemptId, `${extra} min by ${actor.fullName}`]);
+  await audit(actor, "reopen", "attempt", attemptId, `${row.full_name} · ${extra} min`, String(row.organization_id));
+  return { ok: true };
+}
+
+/** Extra time agreed before the exam (for example a student who needs more time to read). */
+export async function setAccommodation(actor: User, examId: string, userId: string, minutes: number): Promise<Ok | Fail> {
+  const exam = await getExam(examId);
+  if (!exam || !managesOrg(actor, exam.organizationId)) return { ok: false, error: "forbidden" };
+  const extra = Math.floor(minutes);
+  if (!(extra >= 0 && extra <= 240)) return { ok: false, error: "validation" };
+  if (extra === 0) await query(`delete from exam_accommodations where exam_id = $1 and user_id = $2`, [examId, userId]);
+  else {
+    await query(
+      `insert into exam_accommodations (exam_id, user_id, extra_minutes) values ($1,$2,$3)
+       on conflict (exam_id, user_id) do update set extra_minutes = excluded.extra_minutes`,
+      [examId, userId, extra],
+    );
+  }
+  await audit(actor, "accommodation", "exam", examId, `${userId} +${extra} min`, exam.organizationId);
+  return { ok: true };
+}
+
+/** Everything that happened during one student's exam, oldest first. */
+export async function attemptTimeline(actor: User, attemptId: string) {
+  const row = await staffAttempt(actor, attemptId);
+  if (!row) return null;
+  const detail = await query(`select started_at, submitted_at, submit_reason, deadline_at, extra_minutes, tab_switch_count, risk_score from attempts where id = $1`, [attemptId]);
+  const events = await query(`select id, kind, detail, snapshot, created_at from proctor_events where attempt_id = $1 order by created_at asc limit 500`, [attemptId]);
   return {
-    examTitle: exam.title,
-    serverNow: new Date(now).toISOString(),
-    sitting: rows.map((row) => {
-      const last = row.last_seen_at ? new Date(String(row.last_seen_at)).getTime() : 0;
-      const inProgress = row.status === "in_progress";
-      const online = inProgress && last > 0 && now - last < 25_000;
-      const total = parseJson<string[]>(row.question_order, []).length;
-      const deadline = new Date(String(row.deadline_at)).getTime();
-      return {
-        id: String(row.id),
-        name: String(row.full_name),
-        status: String(row.status),
-        online,
-        disconnected: inProgress && !online,
-        answered: num(row.answered_count),
-        total,
-        secondsLeft: inProgress ? Math.max(0, Math.round((deadline - now) / 1000)) : 0,
-        disconnects: num(row.disconnect_count),
-        risk: risks.get(String(row.id)) ?? num(row.risk_score),
-        tabSwitches: num(row.tab_switch_count),
-        lastSeen: iso(row.last_seen_at),
-      };
-    }),
+    attemptId,
+    examId: String(row.exam_id),
+    examTitle: String(row.title),
+    name: String(row.full_name),
+    status: String(row.status),
+    startedAt: iso(detail[0]?.started_at),
+    submittedAt: iso(detail[0]?.submitted_at),
+    submitReason: String(detail[0]?.submit_reason ?? ""),
+    deadlineAt: iso(detail[0]?.deadline_at),
+    extraMinutes: num(detail[0]?.extra_minutes),
+    tabSwitches: num(detail[0]?.tab_switch_count),
+    risk: num(detail[0]?.risk_score),
+    events: events.map((event) => ({
+      id: String(event.id),
+      kind: String(event.kind),
+      detail: String(event.detail ?? ""),
+      snapshot: String(event.snapshot ?? ""),
+      createdAt: iso(event.created_at) || "",
+    })),
   };
 }
 
@@ -1579,6 +1822,101 @@ export async function listAttemptSummaries(examId: string) {
   return rows.map((row) => mapAttempt(row));
 }
 
+export type ItemStat = {
+  id: string;
+  no: number;
+  stem: string;
+  type: string;
+  difficulty: string;
+  asked: number;
+  /** Difficulty index p: share of students who got it fully right (0–1). */
+  p: number | null;
+  /** Discrimination index D: p in the top 27% minus p in the bottom 27% (−1 to 1). */
+  d: number | null;
+  choices: { id: string; text: string; correct: boolean; count: number }[];
+  blank: number;
+  flag: "good" | "easy" | "hard" | "weak" | "key" | "few";
+};
+
+/**
+ * Classic item analysis (as in Moodle quiz statistics and ExamSoft): difficulty index, upper–lower
+ * 27% discrimination index, and how many students chose each option.
+ */
+function itemAnalysis(
+  finalized: { id: string; percentage: number | null }[],
+  papers: Map<string, PaperQuestion[]>,
+  answers: Map<string, Map<string, Answer>>,
+): ItemStat[] {
+  const ordered = [...finalized].sort((a, b) => (b.percentage ?? 0) - (a.percentage ?? 0));
+  const k = ordered.length >= 4 ? Math.max(1, Math.round(ordered.length * 0.27)) : 0;
+  const upper = new Set(ordered.slice(0, k).map((attempt) => attempt.id));
+  const lower = new Set(ordered.slice(ordered.length - k).map((attempt) => attempt.id));
+  const stats = new Map<string, ItemStat & { right: number; upRight: number; upN: number; lowRight: number; lowN: number }>();
+  for (const attempt of finalized) {
+    const paper = papers.get(attempt.id) ?? [];
+    const given = answers.get(attempt.id) ?? new Map<string, Answer>();
+    for (const question of paper) {
+      let stat = stats.get(question.id);
+      if (!stat) {
+        stat = {
+          id: question.id,
+          no: stats.size + 1,
+          stem: question.stem,
+          type: question.type,
+          difficulty: question.difficulty,
+          asked: 0,
+          p: null,
+          d: null,
+          choices: question.options.map((option) => ({
+            id: option.id,
+            text: question.type === "true_false" ? (option.id === "true" ? "True" : "False") : option.text,
+            correct: question.correctOptionIds.includes(option.id),
+            count: 0,
+          })),
+          blank: 0,
+          flag: "good",
+          right: 0,
+          upRight: 0,
+          upN: 0,
+          lowRight: 0,
+          lowN: 0,
+        };
+        stats.set(question.id, stat);
+      }
+      const answer = given.get(question.id);
+      const right = Boolean(answer?.isCorrect);
+      stat.asked += 1;
+      if (right) stat.right += 1;
+      if (upper.has(attempt.id)) {
+        stat.upN += 1;
+        if (right) stat.upRight += 1;
+      }
+      if (lower.has(attempt.id)) {
+        stat.lowN += 1;
+        if (right) stat.lowRight += 1;
+      }
+      const picked = answer?.selectedOptionIds ?? [];
+      const empty = !picked.length && !(answer?.textAnswer || "").trim() && !Object.values(answer?.matching || {}).some(Boolean);
+      if (empty) stat.blank += 1;
+      for (const id of picked) {
+        const choice = stat.choices.find((item) => item.id === id);
+        if (choice) choice.count += 1;
+      }
+    }
+  }
+  return [...stats.values()].map(({ right, upRight, upN, lowRight, lowN, ...stat }) => {
+    const p = stat.asked ? Math.round((right / stat.asked) * 100) / 100 : null;
+    const d = upN && lowN ? Math.round((upRight / upN - lowRight / lowN) * 100) / 100 : null;
+    let flag: ItemStat["flag"] = "good";
+    if (stat.asked < 5) flag = "few";
+    else if (d != null && d < 0) flag = "key";
+    else if (p != null && p > 0.9) flag = "easy";
+    else if (p != null && p < 0.2) flag = "hard";
+    else if (d != null && d < 0.2) flag = "weak";
+    return { ...stat, p, d, flag };
+  });
+}
+
 export async function examReport(actor: User, examId: string) {
   const exam = await getExam(examId);
   if (!exam || !managesOrg(actor, exam.organizationId)) return null;
@@ -1650,6 +1988,12 @@ export async function examReport(actor: User, examId: string) {
     [examId],
   );
   const average = finalized.length ? Math.round((finalized.reduce((sum, attempt) => sum + (attempt.percentage ?? 0), 0) / finalized.length) * 10) / 10 : null;
+  const sortedPct = finalized.map((attempt) => attempt.percentage ?? 0).sort((a, b) => a - b);
+  const median = sortedPct.length
+    ? Math.round((sortedPct.length % 2 ? sortedPct[(sortedPct.length - 1) / 2] : (sortedPct[sortedPct.length / 2 - 1] + sortedPct[sortedPct.length / 2]) / 2) * 10) / 10
+    : null;
+  const lowest = sortedPct.length ? sortedPct[0] : null;
+  const items = itemAnalysis(finalized, papers, answersByAttempt);
   const passRate = finalized.length ? Math.round((finalized.filter((attempt) => attempt.passed).length / finalized.length) * 1000) / 10 : null;
   const highest = finalized.length ? Math.max(...finalized.map((attempt) => attempt.percentage ?? 0)) : null;
   let rank = 0;
@@ -1676,8 +2020,11 @@ export async function examReport(actor: User, examId: string) {
       createdAt: iso(row.created_at) || "",
     })),
     average,
+    median,
+    lowest,
     passRate,
     highest,
+    items,
     submitted: attempts.filter((attempt) => attempt.status === "submitted").length,
   };
 }
@@ -1952,9 +2299,14 @@ export async function loginAudit(user: User) {
   await audit(user, "login", "session", user.id, user.email, user.organizationId);
 }
 
+/** Wiping the database back to demo data is for local testing only, never on the live site. */
+export function demoRestoreAllowed() {
+  return usingLocalFile() || process.env.ALLOW_DEMO_RESTORE === "true";
+}
+
 export async function restoreDemo(actor: User): Promise<Ok | Fail> {
   if (actor.role !== "super_admin") return { ok: false, error: "forbidden" };
-  if (!usingLocalFile() && process.env.SEED_DEMO !== "true") return { ok: false, error: "restore_disabled" };
+  if (!demoRestoreAllowed()) return { ok: false, error: "restore_disabled" };
   const { reseed } = await import("./seed");
   await reseed();
   return { ok: true };

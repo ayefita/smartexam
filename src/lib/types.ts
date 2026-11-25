@@ -110,6 +110,8 @@ export type PaperQuestion = {
   points: number;
 };
 
+export type Blueprint = { easy: number; medium: number; hard: number };
+
 export type Exam = {
   id: string;
   organizationId: string;
@@ -137,6 +139,16 @@ export type Exam = {
   randomCount: number;
   proctorWebcam: boolean;
   proctorFullscreen: boolean;
+  /** Code the invigilator reads out in the hall. Empty means no code. */
+  accessCode: string;
+  /** Block copy, paste and right-click in the exam player. */
+  blockCopy: boolean;
+  /** Submit the exam automatically after this many tab switches. 0 means never. */
+  tabLimit: number;
+  /** Share of a question's points taken away for a wrong choice (0, 0.25, 0.5...). */
+  negativeMark: number;
+  /** For a random paper: how many easy, medium and hard questions each student gets. */
+  blueprint: Blueprint;
   status: ExamStatus;
   createdBy: string | null;
   createdAt: string;

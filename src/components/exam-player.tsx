@@ -324,17 +324,28 @@ export function ExamPlayer({
   }
   if (!question) return null;
   const answer = current();
+  const isAnswered = (id: string) => {
+    const state = answers[id];
+    return !!state && (state.selected.length > 0 || !!state.text.trim() || Object.values(state.matching || {}).some(Boolean));
+  };
+  const unansweredNos = questions.map((item, itemIndex) => (isAnswered(item.id) ? 0 : itemIndex + 1)).filter(Boolean);
+  const flaggedNos = questions.map((item, itemIndex) => (answers[item.id]?.flagged ? itemIndex + 1 : 0)).filter(Boolean);
+  const ux = dict.ux.player;
+  const jump = (n: number) => {
+    setConfirm(false);
+    setIndex(n - 1);
+  };
 
   return (
     <div className="mx-auto grid max-w-5xl gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">SmartExam</p>
-          <h1 className="font-heading text-2xl font-semibold">{title}</h1>
+      <div className="sticky top-16 z-20 -mx-4 flex flex-nowrap items-center justify-between gap-3 border-b border-border bg-background/95 px-4 py-2 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0">
+        <div className="min-w-0">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">{fill(dict.player.question, { n: index + 1, total: questions.length })}</p>
+          <h1 className="truncate font-heading text-lg font-semibold md:text-2xl">{title}</h1>
         </div>
-        <div className={`rounded-xl px-3 py-2 text-center ${low ? "bg-[#fde8ec] text-[#8e1e32]" : "bg-primary text-primary-foreground"}`} role="timer" aria-label={dict.player.time}>
-          <p className="text-[11px] uppercase tracking-wide">{dict.player.time}</p>
-          <p className="font-heading text-2xl tabular-nums">{formatClock(left)}</p>
+        <div className={`shrink-0 rounded-xl px-3 py-1.5 text-center md:py-2 ${low ? "bg-[#fde8ec] text-[#8e1e32]" : "bg-primary text-primary-foreground"}`} role="timer" aria-label={dict.player.time}>
+          <p className="text-[11px] uppercase tracking-wide">{ux.timeLeft}</p>
+          <p className="font-heading text-xl tabular-nums md:text-2xl">{formatClock(left)}</p>
         </div>
       </div>
       <p className="sr-only" aria-live="polite">{syncLabel}{offline ? ` ${dict.player.offline}` : ""}</p>
@@ -403,7 +414,7 @@ export function ExamPlayer({
             {index < questions.length - 1 ? (
               <Button type="button" className="h-11" onClick={() => setIndex((value) => value + 1)}>{dict.player.next}</Button>
             ) : (
-              <Button type="button" className="h-11" onClick={() => setConfirm(true)}>{dict.player.submit}</Button>
+              <Button type="button" className="h-11" onClick={() => setConfirm(true)}>{ux.review}</Button>
             )}
             <span className="text-xs text-muted-foreground" aria-hidden>{syncLabel}</span>
           </div>
@@ -411,25 +422,33 @@ export function ExamPlayer({
         </article>
         <aside className="rounded-2xl bg-card p-3 ring-1 ring-foreground/10">
           <h2 className="px-1 text-sm font-medium">{dict.player.navigator}</h2>
-          <div className="mt-2 grid grid-cols-5 gap-2" role="navigation" aria-label={dict.player.navigator}>
+          <div className="mt-2 grid grid-cols-5 gap-2 sm:grid-cols-8 lg:grid-cols-5" role="navigation" aria-label={dict.player.navigator}>
             {questions.map((item, itemIndex) => {
               const state = answers[item.id];
-              const answered = !!state && (state.selected.length > 0 || state.text.trim() || Object.values(state.matching || {}).some(Boolean));
+              const answered = isAnswered(item.id);
+              const status = [answered ? ux.answered : ux.empty, state?.flagged ? ux.flagged : ""].filter(Boolean).join(", ");
               return (
                 <button
                   key={item.id}
                   type="button"
                   aria-current={itemIndex === index ? "true" : undefined}
-                  aria-label={fill(dict.player.question, { n: itemIndex + 1, total: questions.length })}
+                  aria-label={`${fill(dict.player.question, { n: itemIndex + 1, total: questions.length })}: ${status}`}
                   onClick={() => setIndex(itemIndex)}
-                  className={`relative h-11 rounded-lg text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${itemIndex === index ? "bg-primary text-primary-foreground" : answered ? "bg-[#e5f6ee] text-[#0c5c40]" : "bg-muted"}`}
+                  className={`relative h-11 rounded-lg text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${itemIndex === index ? "bg-primary text-primary-foreground" : answered ? "bg-[#e5f6ee] text-[#0c5c40]" : "bg-muted"} ${state?.flagged ? "ring-2 ring-[#b8860b]" : ""}`}
                 >
                   {itemIndex + 1}
-                  {state?.flagged ? <span className="absolute right-1 top-1 size-2 rounded-full bg-[#c4a035]" aria-hidden /> : null}
+                  {state?.flagged ? <span className="absolute right-1 top-1 size-2 rounded-full bg-[#b8860b]" aria-hidden /> : null}
                 </button>
               );
             })}
           </div>
+          <ul className="mt-3 grid gap-1 text-xs text-muted-foreground" aria-hidden>
+            <li className="flex items-center gap-2"><span className="size-3 rounded bg-[#e5f6ee] ring-1 ring-[#0c5c40]/30" />{ux.answered}</li>
+            <li className="flex items-center gap-2"><span className="size-3 rounded bg-muted ring-1 ring-foreground/20" />{ux.empty}</li>
+            <li className="flex items-center gap-2"><span className="size-3 rounded ring-2 ring-[#b8860b]" />{ux.flagged}</li>
+            <li className="flex items-center gap-2"><span className="size-3 rounded bg-primary" />{ux.current}</li>
+          </ul>
+          <Button type="button" variant="outline" className="mt-3 h-11 w-full" onClick={() => setConfirm(true)}>{ux.review}</Button>
           {proctorWebcam ? (
             <video ref={videoRef} autoPlay muted playsInline aria-label={dict.player.camera} className="mt-4 aspect-video w-full rounded-lg bg-black object-cover" />
           ) : null}
@@ -438,12 +457,31 @@ export function ExamPlayer({
       <Dialog open={confirm} onOpenChange={setConfirm}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{dict.player.submit}</DialogTitle>
-            <DialogDescription>{dict.player.confirm}</DialogDescription>
+            <DialogTitle>{ux.reviewTitle}</DialogTitle>
+            <DialogDescription>{fill(ux.summary, { a: questions.length - unansweredNos.length, u: unansweredNos.length, f: flaggedNos.length })}</DialogDescription>
           </DialogHeader>
+          <div className="grid gap-3 text-sm">
+            {unansweredNos.length === 0 ? <p className="rounded-lg bg-[#e5f6ee] p-3 text-[#0c5c40]">{ux.allAnswered}</p> : (
+              <div>
+                <p className="font-medium">{ux.unanswered}</p>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {unansweredNos.map((n) => <Button key={n} type="button" variant="outline" className="h-10 min-w-10" aria-label={fill(ux.goTo, { n })} onClick={() => jump(n)}>{n}</Button>)}
+                </div>
+              </div>
+            )}
+            {flaggedNos.length ? (
+              <div>
+                <p className="font-medium">{ux.flaggedList}</p>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {flaggedNos.map((n) => <Button key={n} type="button" variant="outline" className="h-10 min-w-10 ring-2 ring-[#b8860b]" aria-label={fill(ux.goTo, { n })} onClick={() => jump(n)}>{n}</Button>)}
+                </div>
+              </div>
+            ) : null}
+            <p className="text-muted-foreground">{dict.player.confirm}</p>
+          </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setConfirm(false)}>{dict.common.cancel}</Button>
-            <Button type="button" onClick={() => void submit("manual")}>{dict.player.submit}</Button>
+            <Button type="button" variant="outline" className="h-11" onClick={() => setConfirm(false)}>{ux.back}</Button>
+            <Button type="button" className="h-11" onClick={() => void submit("manual")}>{ux.submit}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

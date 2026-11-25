@@ -7,7 +7,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-body);
+  --font-sans: var(--font-latin), var(--font-body), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-display);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -126,5 +126,18 @@
   }
   html {
     @apply font-sans;
+    scroll-behavior: smooth;
+  }
+  /* A clear focus ring for keyboard users on links, inputs and summaries. */
+  a:focus-visible,
+  summary:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  summary::-webkit-details-marker {
+    color: var(--primary);
   }
 }

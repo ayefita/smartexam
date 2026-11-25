@@ -4,10 +4,10 @@ import { usePathname } from "next/navigation";
 import { localeAction } from "@/app/actions/auth";
 import type { Locale } from "@/lib/i18n";
 
-const options: { id: Locale; label: string }[] = [
-  { id: "en", label: "English" },
-  { id: "am", label: "አማርኛ" },
-  { id: "om", label: "Afaan Oromoo" },
+const options: { id: Locale; label: string; short: string }[] = [
+  { id: "en", label: "English", short: "EN" },
+  { id: "am", label: "አማርኛ", short: "አማ" },
+  { id: "om", label: "Afaan Oromoo", short: "Oromoo" },
 ];
 
 export function LanguageSwitcher({ locale, light = false }: { locale: Locale; light?: boolean }) {
@@ -21,6 +21,8 @@ export function LanguageSwitcher({ locale, light = false }: { locale: Locale; li
           <button
             type="submit"
             aria-pressed={locale === option.id}
+            aria-label={option.label}
+            lang={option.id}
             className={`h-9 rounded-full px-2.5 text-xs font-medium focus-visible:outline-2 focus-visible:outline-offset-2 ${
               locale === option.id
                 ? light
@@ -31,7 +33,8 @@ export function LanguageSwitcher({ locale, light = false }: { locale: Locale; li
                   : "text-foreground hover:bg-muted"
             }`}
           >
-            {option.label}
+            <span className="sm:hidden" aria-hidden>{option.short}</span>
+            <span className="hidden sm:inline">{option.label}</span>
           </button>
         </form>
       ))}

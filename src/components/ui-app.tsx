@@ -73,3 +73,14 @@ export function TextLink({ href, children }: { href: string; children: React.Rea
     </Link>
   );
 }
+
+/** Shown when a list has nothing in it: what it is, and the one thing to do next. */
+export function EmptyState({ title, help, action }: { title: string; help?: string; action?: React.ReactNode }) {
+  return (
+    <div className="grid justify-items-start gap-2 rounded-2xl border border-dashed border-foreground/20 bg-card/60 p-6">
+      <p className="font-heading text-lg">{title}</p>
+      {help ? <p className="max-w-xl text-sm text-muted-foreground">{help}</p> : null}
+      {action ? <div className="mt-2">{action}</div> : null}
+    </div>
+  );
+}

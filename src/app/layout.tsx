@@ -13,6 +13,15 @@ const body = localFont({
   display: "swap",
 });
 
+const latin = localFont({
+  src: [
+    { path: "../../assets/fonts/NotoSans-Regular.ttf", weight: "400", style: "normal" },
+    { path: "../../assets/fonts/NotoSans-Bold.ttf", weight: "700", style: "normal" },
+  ],
+  variable: "--font-latin",
+  display: "swap",
+});
+
 const display = Fraunces({
   subsets: ["latin"],
   variable: "--font-display",
@@ -26,8 +35,8 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const { locale } = await getDictionary();
   return (
-    <html lang={locale}>
-      <body className={`${body.variable} ${display.variable} antialiased`}>{children}</body>
+    <html lang={locale} className={`${latin.variable} ${body.variable} ${display.variable}`}>
+      <body className="font-sans antialiased">{children}</body>
     </html>
   );
 }

@@ -39,6 +39,35 @@ export async function reportXlsx(report: Report) {
   for (const question of report.questions) {
     questions.addRow([question.stem, question.type, question.subject, question.topic, question.asked, question.correct, question.earned, question.possible]);
   }
+  const items = book.addWorksheet("Item analysis");
+  items.addRow(["#", "Question", "Difficulty", "Asked", "Right % (p)", "Discrimination (D)", "Choices (count, ✓ = key)", "Blank", "Note"]);
+  const notes = { good: "Good", easy: "Too easy", hard: "Too hard", weak: "Does not separate strong and weak students", key: "Check the answer key", few: "Too few answers yet" };
+  for (const item of report.items) {
+    items.addRow([
+      item.no,
+      item.stem,
+      item.difficulty,
+      item.asked,
+      item.p == null ? null : Math.round(item.p * 100),
+      item.d,
+      item.choices.map((choice, index) => `${"ABCDEFGHIJ"[index] || index + 1}${choice.correct ? "✓" : ""}: ${choice.count}`).join("  "),
+      item.blank,
+      notes[item.flag],
+    ]);
+  }
+  items.getColumn(2).width = 60;
+  items.getColumn(7).width = 36;
+  const summary = book.addWorksheet("Summary");
+  summary.addRows([
+    ["Exam", report.exam.title],
+    ["Submitted", report.submitted],
+    ["Pass rate %", report.passRate],
+    ["Average %", report.average],
+    ["Median %", report.median],
+    ["Highest %", report.highest],
+    ["Lowest %", report.lowest],
+  ]);
+  for (const bucket of report.distribution) summary.addRow([`Scores ${bucket.label}`, bucket.count]);
   return Buffer.from(await book.xlsx.writeBuffer());
 }
 
@@ -132,15 +161,29 @@ export async function reportPdf(report: Report) {
   write("SmartExam", 18, true);
   write(report.exam.title, 14, true);
   write(`${report.exam.organizationName} · ${formatAddis(new Date().toISOString(), "en")}`);
-  write(`Average ${report.average ?? "—"}% · Pass rate ${report.passRate ?? "—"}% · Highest ${report.highest ?? "—"}%`);
+  write(`Submitted ${report.submitted} · Pass rate ${report.passRate ?? "—"}% · Average ${report.average ?? "—"}% · Median ${report.median ?? "—"}% · Highest ${report.highest ?? "—"}% · Lowest ${report.lowest ?? "—"}%`);
+  write("Score distribution", 13, true);
+  const most = Math.max(1, ...report.distribution.map((bucket) => bucket.count));
+  for (const bucket of report.distribution) {
+    if (y < 56) {
+      page = pdf.addPage([595, 842]);
+      y = 800;
+    }
+    drawMixed(page, bucket.label, 40, y, 10, fonts, false, ink);
+    const width = (bucket.count / most) * 380;
+    if (width > 0) page.drawRectangle({ x: 100, y: y - 1, width, height: 9, color: rgb(0.05, 0.36, 0.25) });
+    drawMixed(page, String(bucket.count), 100 + width + 6, y, 10, fonts, false, ink);
+    y -= 16;
+  }
   write("Results", 13, true);
   for (const attempt of report.ranked) {
     write(`${attempt.rank}. ${attempt.candidateName} — ${attempt.percentage}% (${attempt.passed ? "Passed" : "Not passed"})`);
   }
-  write("Questions", 13, true);
-  for (const question of report.questions) {
-    const rate = question.asked ? Math.round((question.correct / question.asked) * 100) : 0;
-    write(`${rate}% fully correct · ${question.stem.replace(/\s+/g, " ")}`);
+  write("Item analysis (p = share right, D = top 27% minus bottom 27%)", 13, true);
+  for (const item of report.items) {
+    const choices = item.choices.map((choice, index) => `${"ABCDEFGHIJ"[index] || index + 1}${choice.correct ? "✓" : ""} ${choice.count}`).join("  ");
+    write(`${item.no}. ${item.stem.replace(/\s+/g, " ").slice(0, 160)}`, 10, true);
+    write(`p ${item.p == null ? "—" : Math.round(item.p * 100) + "%"} · D ${item.d == null ? "—" : item.d.toFixed(2)}${choices ? ` · ${choices}` : ""} · blank ${item.blank}`, 10);
   }
   return Buffer.from(await pdf.save());
 }

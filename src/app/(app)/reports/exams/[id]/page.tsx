@@ -3,7 +3,7 @@ import { keepProctorAction, summarizeProctorAction } from "@/app/actions/staff";
 import { AssistNote } from "@/components/assist-note";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { PageHeader } from "@/components/ui-app";
+import { PageHeader, Pill } from "@/components/ui-app";
 import { latestSuggestion } from "@/lib/assist";
 import { requireUser } from "@/lib/auth";
 import { examReport } from "@/lib/domain";
@@ -17,6 +17,8 @@ export default async function ExamReportPage({ params }: { params: Promise<{ id:
   if (!report) return <p>{dict.errors.not_found}</p>;
   const maxBucket = Math.max(1, ...report.distribution.map((bucket) => bucket.count));
   const summary = await latestSuggestion("proctor", id);
+  const w = dict.world.items;
+  const letters = "ABCDEFGHIJ";
   const followUp = Array.isArray(summary?.payload.followUp) ? summary.payload.followUp.map(String) : [];
   return (
     <div>
@@ -27,12 +29,14 @@ export default async function ExamReportPage({ params }: { params: Promise<{ id:
           <Button variant="outline" className="h-9" render={<a href={`/api/reports/exams/${id}?format=pdf`} />}>{dict.common.exportPdf}</Button>
         </div>
       } />
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
         {[
-          [dict.reports.average, report.average == null ? "—" : `${report.average}%`],
-          [dict.reports.passRate, report.passRate == null ? "—" : `${report.passRate}%`],
-          [dict.reports.highest, report.highest == null ? "—" : `${report.highest}%`],
           [dict.exams.attempts, String(report.submitted)],
+          [dict.reports.passRate, report.passRate == null ? "—" : `${report.passRate}%`],
+          [dict.reports.average, report.average == null ? "—" : `${report.average}%`],
+          [w.median, report.median == null ? "—" : `${report.median}%`],
+          [dict.reports.highest, report.highest == null ? "—" : `${report.highest}%`],
+          [w.lowest, report.lowest == null ? "—" : `${report.lowest}%`],
         ].map(([label, value]) => (
           <article key={label} className="rounded-2xl bg-card p-4 ring-1 ring-foreground/10"><p className="text-xs text-muted-foreground">{label}</p><p className="font-heading text-3xl">{value}</p></article>
         ))}
@@ -68,10 +72,57 @@ export default async function ExamReportPage({ params }: { params: Promise<{ id:
       <ul className="mt-2 grid gap-1 text-sm">
         {report.topics.map((topic) => <li key={topic.topic}>{topic.topic}: {topic.possible ? Math.round((topic.earned / topic.possible) * 100) : 0}%</li>)}
       </ul>
-      <h2 className="mt-8 font-heading text-xl">{dict.reports.questions}</h2>
-      <ul className="mt-2 grid gap-2 text-sm">
-        {report.questions.map((question) => <li key={question.id} className="rounded-lg bg-card p-3 ring-1 ring-foreground/10">{question.stem}<span className="mt-1 block text-muted-foreground">{dict.reports.asked} {question.asked} · {dict.reports.correctRate} {question.asked ? Math.round((question.correct / question.asked) * 100) : 0}%</span></li>)}
-      </ul>
+      <section className="mt-8" id="item-analysis">
+        <h2 className="font-heading text-xl">{w.title}</h2>
+        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{w.lead}</p>
+        {report.items.length ? (
+          <div className="mt-3 overflow-x-auto rounded-xl bg-card ring-1 ring-foreground/10">
+            <table className="w-full min-w-[820px] text-sm">
+              <thead>
+                <tr className="border-b text-left">
+                  <th className="px-3 py-2">#</th>
+                  <th className="px-3 py-2">{w.question}</th>
+                  <th className="px-3 py-2" title={w.pHelp}>{w.p}</th>
+                  <th className="px-3 py-2" title={w.dHelp}>{w.d}</th>
+                  <th className="px-3 py-2">{w.choices}</th>
+                  <th className="px-3 py-2">{w.note}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.items.map((item) => {
+                  const most = Math.max(1, ...item.choices.map((choice) => choice.count), item.blank);
+                  return (
+                    <tr key={item.id} className="border-b align-top last:border-0">
+                      <td className="px-3 py-3 text-muted-foreground">{item.no}</td>
+                      <td className="max-w-sm px-3 py-3">
+                        <p className="line-clamp-3">{item.stem}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{dict.difficulty[item.difficulty as keyof typeof dict.difficulty] || item.difficulty} · {dict.reports.asked} {item.asked}</p>
+                      </td>
+                      <td className="px-3 py-3 tabular-nums">{item.p == null ? "—" : `${Math.round(item.p * 100)}%`}</td>
+                      <td className={`px-3 py-3 tabular-nums ${item.d != null && item.d < 0.2 ? "text-[#8e1e32]" : ""}`}>{item.d == null ? "—" : item.d.toFixed(2)}</td>
+                      <td className="px-3 py-3">
+                        {item.choices.length ? (
+                          <ul className="grid min-w-48 gap-1">
+                            {item.choices.map((choice, index) => (
+                              <li key={choice.id} className="grid grid-cols-[1.5rem_1fr_2rem] items-center gap-2 text-xs" title={choice.text}>
+                                <span className={choice.correct ? "font-semibold text-[#0c5c40]" : ""}>{letters[index] || index + 1}{choice.correct ? " ✓" : ""}</span>
+                                <span className="h-2.5 rounded-full bg-muted"><span className={`block h-2.5 rounded-full ${choice.correct ? "bg-[#0c7a52]" : "bg-[#b8860b]"}`} style={{ width: `${(choice.count / most) * 100}%` }} /></span>
+                                <span className="tabular-nums">{choice.count}</span>
+                              </li>
+                            ))}
+                            <li className="grid grid-cols-[1.5rem_1fr_2rem] items-center gap-2 text-xs text-muted-foreground"><span>—</span><span>{w.blank}</span><span className="tabular-nums">{item.blank}</span></li>
+                          </ul>
+                        ) : <span className="text-xs text-muted-foreground">{w.blank}: {item.blank}</span>}
+                      </td>
+                      <td className="px-3 py-3"><Pill tone={item.flag === "good" ? "good" : item.flag === "key" ? "bad" : item.flag === "few" ? "neutral" : "wait"}>{w.flags[item.flag]}</Pill></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : <p className="mt-2 text-sm text-muted-foreground">{w.empty}</p>}
+      </section>
       <section className="mt-8 grid max-w-3xl gap-3 rounded-2xl bg-card p-4 ring-1 ring-foreground/10">
         <h2 className="font-heading text-xl">{dict.assist.proctor}</h2>
         <p className="text-sm text-muted-foreground">{dict.assist.proctorb}</p>

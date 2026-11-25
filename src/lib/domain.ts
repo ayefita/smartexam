@@ -1356,16 +1356,9 @@ export async function saveAnswers(
   actor: User,
   input: { attemptId: string; tabId: string; answers: AnswerInput[] },
 ): Promise<Ok<{ savedAt: string; saved: string[] }> | Fail> {
-  const attempt = await ownLiveAttempt(actor, input.attemptId);
-  if (!attempt || attempt.status !== "in_progress") return { ok: false, error: "already_submitted" };
-  if (new Date(attempt.deadlineAt).getTime() <= Date.now()) {
-    await finishAttempt(input.attemptId, "timer");
-    return { ok: false, error: "expired" };
-  }
-  if (!(await holdSession(input.attemptId, input.tabId))) return { ok: false, error: "other_session" };
-  const onPaper = new Set(attempt.paper.map((question) => question.id));
-  const rows = input.answers
-    .filter((answer) => onPaper.has(answer.questionId))
+  // The same question twice in one batch would break the upsert: keep the last one.
+  const latest = new Map(input.answers.filter((answer) => answer.questionId).map((answer) => [answer.questionId, answer]));
+  const rows = [...latest.values()]
     .slice(0, 300)
     .map((answer) => ({
       qid: answer.questionId,
@@ -1374,28 +1367,51 @@ export async function saveAnswers(
       mat: answer.matching && typeof answer.matching === "object" ? answer.matching : {},
       flg: Boolean(answer.flagged),
     }));
-  if (!rows.length) return input.answers.length ? { ok: false, error: "validation" } : { ok: true, savedAt: new Date().toISOString(), saved: [] };
-  await query(
-    `insert into answers (attempt_id, question_id, selected_option_ids, text_answer, matching, flagged, updated_at)
-     select $1, r.qid, r.sel, r.txt, r.mat, r.flg, now()
-     from jsonb_to_recordset($2::jsonb) as r(qid text, sel jsonb, txt text, mat jsonb, flg boolean)
-     on conflict (attempt_id, question_id) do update set
-       selected_option_ids = excluded.selected_option_ids,
-       text_answer = excluded.text_answer,
-       matching = excluded.matching,
-       flagged = excluded.flagged,
-       updated_at = now()`,
-    [input.attemptId, JSON.stringify(rows)],
+  if (!rows.length) return { ok: true, savedAt: new Date().toISOString(), saved: [] };
+  // Fast path, one round trip: hold the session, check time and paper, and upsert every answer.
+  const result = await query(
+    `with held as (
+       update attempts set session_token = $3, last_seen_at = now()
+       where id = $1 and candidate_id = $4 and status = 'in_progress' and deadline_at > now()
+         and (session_token is null or session_token = $3)
+       returning id, question_order
+     ), saved as (
+       insert into answers (attempt_id, question_id, selected_option_ids, text_answer, matching, flagged, updated_at)
+       select held.id, r.qid, r.sel, r.txt, r.mat, r.flg, now()
+       from jsonb_to_recordset($2::jsonb) as r(qid text, sel jsonb, txt text, mat jsonb, flg boolean)
+       join held on held.question_order ? r.qid
+       on conflict (attempt_id, question_id) do update set
+         selected_option_ids = excluded.selected_option_ids,
+         text_answer = excluded.text_answer,
+         matching = excluded.matching,
+         flagged = excluded.flagged,
+         updated_at = now()
+       returning question_id
+     )
+     select (select count(*) from held)::int as held, coalesce((select jsonb_agg(question_id) from saved), '[]'::jsonb) as saved`,
+    [input.attemptId, JSON.stringify(rows), input.tabId, actor.id],
   );
+  if (!num(result[0]?.held)) {
+    // Slow path, only when something is wrong: explain why.
+    const attempt = await ownLiveAttempt(actor, input.attemptId);
+    if (!attempt || attempt.status !== "in_progress") return { ok: false, error: "already_submitted" };
+    if (new Date(attempt.deadlineAt).getTime() <= Date.now()) {
+      await finishAttempt(input.attemptId, "timer");
+      return { ok: false, error: "expired" };
+    }
+    return { ok: false, error: "other_session" };
+  }
+  const saved = parseJson<string[]>(result[0]?.saved, []);
+  if (!saved.length) return { ok: false, error: "validation" };
   await query(
-    `update attempts set last_seen_at = now(), answered_count = (
+    `update attempts set answered_count = (
       select count(*) from answers where attempt_id = $1 and (
         jsonb_array_length(selected_option_ids) > 0 or length(text_answer) > 0 or matching::text not in ('{}','null')
       )
     ) where id = $1`,
     [input.attemptId],
   );
-  return { ok: true, savedAt: new Date().toISOString(), saved: rows.map((row) => row.qid) };
+  return { ok: true, savedAt: new Date().toISOString(), saved };
 }
 
 export async function saveAnswer(

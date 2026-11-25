@@ -15,7 +15,25 @@ type Runner = {
 const globalForDb = globalThis as unknown as { __smartexam?: Promise<Runner>; __smartexamRunner?: Runner };
 
 function databaseUrl() {
-  return process.env.NETLIFY_DB_URL || process.env.DATABASE_URL || "";
+  const url = process.env.NETLIFY_DB_URL || process.env.DATABASE_URL || "";
+  // Supabase session mode allows only ~15 clients in total, and every serverless instance holds one.
+  // Transaction mode (port 6543) shares connections, which is what 400 students at once need.
+  if (process.env.DB_POOL_MODE === "transaction") return url.replace(/(pooler\.supabase\.com):5432/, "$1:6543");
+  return url;
+}
+
+const BUSY = /EMAXCONN|max clients|MaxClients|too many clients|remaining connection slots|CONNECT_TIMEOUT|ECONNRESET|Connection terminated/i;
+
+/** Retry a query a few times when the pool is momentarily full or a connection dropped. */
+async function withRetry<T>(run: () => Promise<T>) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await run();
+    } catch (error) {
+      if (attempt >= 3 || !BUSY.test(String((error as Error)?.message || error))) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 150 * 2 ** attempt + Math.random() * 150));
+    }
+  }
 }
 
 export function usingLocalFile() {
@@ -48,6 +66,7 @@ async function createRunner(): Promise<Runner> {
       max: serverless ? 1 : 4,
       ssl: needsSsl(url) ? "require" : false,
       idle_timeout: 20,
+      connect_timeout: 10,
       prepare: !pooled,
     });
     return {
@@ -55,7 +74,7 @@ async function createRunner(): Promise<Runner> {
         await sql.unsafe(text);
       },
       async query(text, params = []) {
-        return (await sql.unsafe(jsonText(text), params as never[])) as unknown as Record<string, unknown>[];
+        return withRetry(async () => (await sql.unsafe(jsonText(text), params as never[])) as unknown as Record<string, unknown>[]);
       },
       tx<T>(fn: (q: QueryFn) => Promise<T>) {
         return sql.begin(async (trx) => {

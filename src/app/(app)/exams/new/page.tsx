@@ -16,7 +16,7 @@ export default async function NewExamPage({ searchParams }: { searchParams: Prom
   ]);
   return (
     <div>
-      <PageHeader title={dict.exams.new} />
+      <PageHeader title={dict.exams.new} lede={dict.ux.guide.s2Help} />
       <Notice error text={params.error ? dict.errors[params.error as keyof typeof dict.errors] || dict.errors.generic : ""} />
       <ExamEditor
         dict={dict}

@@ -29,6 +29,7 @@ import {
   importQuestionRows,
   releaseExamNow,
   resetAttemptSession,
+  setExamStatus,
   startAttempt,
   getExam,
   getResultView,
@@ -221,7 +222,7 @@ export async function saveExamAction(formData: FormData) {
   };
   const result = await saveExam(actor, input);
   if (!result.ok) go(input.id ? `/exams/${input.id}` : "/exams/new", result.error);
-  redirect(`/exams/${result.id}?saved=1`);
+  redirect(`/exams/${result.id}?${input.id ? "saved" : "created"}=1`);
 }
 
 export async function deleteExamAction(formData: FormData) {
@@ -502,4 +503,13 @@ export async function resetAndEmailAction(userIds: string[], examId: string) {
 export async function examLoginTargetsAction(examId: string) {
   const actor = await requireUser(["super_admin", "exam_manager"]);
   return (await examLoginTargets(actor, String(examId || ""))) ?? [];
+}
+
+export async function setExamStatusAction(formData: FormData) {
+  const actor = await requireUser(["super_admin", "exam_manager"]);
+  const id = String(formData.get("id") || "");
+  const status = String(formData.get("status") || "") as ExamStatus;
+  const result = await setExamStatus(actor, id, status);
+  if (!result.ok) go(`/exams/${id}`, result.error);
+  redirect(`/exams/${id}?status=${status}`);
 }

@@ -1977,3 +1977,63 @@ export async function questionsForEditor(actor: User, organizationId: string) {
   }));
 }
 
+
+/** Progress through the five setup steps on the staff home page, from real data. */
+export async function setupProgress(actor: User) {
+  const org = scopedOrg(actor);
+  const rows = await query(
+    `select
+       (select count(*) from questions where ($1::text is null or organization_id = $1)) as questions,
+       (select count(*) from exams where ($1::text is null or organization_id = $1)) as exams,
+       (select count(*) from exams e where ($1::text is null or e.organization_id = $1)
+          and exists (select 1 from exam_assignments a where a.exam_id = e.id)) as assigned,
+       (select count(*) from audit_logs l where l.action in ('email_logins', 'reset_logins')
+          and ($1::text is null or l.organization_id = $1)) as logins,
+       (select count(*) from exams where status = 'published' and ($1::text is null or organization_id = $1)) as published,
+       (select id from exams e where ($1::text is null or e.organization_id = $1) and e.status <> 'closed'
+          order by (e.status = 'draft') desc, e.updated_at desc limit 1) as focus_exam`,
+    [org],
+  );
+  const row = rows[0] || {};
+  return {
+    questions: num(row.questions),
+    exams: num(row.exams),
+    assigned: num(row.assigned),
+    logins: num(row.logins),
+    published: num(row.published),
+    focusExamId: row.focus_exam ? String(row.focus_exam) : null,
+  };
+}
+
+/** What is done for one exam: questions, students, logins and publishing. */
+export async function examProgress(examId: string) {
+  const rows = await query(
+    `select
+       (select count(*) from exam_questions where exam_id = $1) as questions,
+       (select coalesce(sum(points), 0) from exam_questions where exam_id = $1) as points,
+       (select count(*) from audit_logs where entity_id = $1 and action in ('email_logins', 'reset_logins')) as logins`,
+    [examId],
+  );
+  const students = await assignedCandidates(examId);
+  return {
+    questions: num(rows[0]?.questions),
+    points: num(rows[0]?.points),
+    students: students.length,
+    loginsSent: num(rows[0]?.logins) > 0,
+  };
+}
+
+export async function setExamStatus(actor: User, examId: string, status: ExamStatus): Promise<Ok | Fail> {
+  const exam = await getExam(examId);
+  if (!exam || !managesOrg(actor, exam.organizationId)) return { ok: false, error: "forbidden" };
+  if (!["draft", "published", "closed"].includes(status)) return { ok: false, error: "validation" };
+  if (status === "published") {
+    const count = await query(`select count(*) as n from exam_questions where exam_id = $1`, [examId]);
+    if (num(count[0]?.n) < 1) return { ok: false, error: "no_questions" };
+  }
+  if (status === exam.status) return { ok: true };
+  await query(`update exams set status = $1, updated_at = now() where id = $2`, [status, examId]);
+  await audit(actor, status === "published" ? "publish" : "update", "exam", examId, `${exam.title} · ${status}`, exam.organizationId);
+  if (status === "published") await notifyScheduledExam(examId);
+  return { ok: true };
+}

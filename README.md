@@ -6,7 +6,7 @@ The interface is in English, Amharic, and Afaan Oromo. Question text stays in th
 
 ## Demo accounts
 
-These accounts are already verified. Change the passwords before a real deployment.
+These accounts are already verified. **These passwords are public (they are in this file).** On a real site, sign in as the super admin and use **Change my password** (under your name), then **Students → Set password** for the other demo accounts, or deactivate them.
 
 | Role | Email | Password |
 | --- | --- | --- |
@@ -21,6 +21,19 @@ Sample exams:
 - **Computer Science Exit Examination** — instant results. Abel can sit it now and see the mark on submit. Webcam snapshots and fullscreen are requested.
 - **Undergraduate Entrance Sample** — scheduled release. The window ends 15 December 2026, 18:00 Addis Ababa, and results open 14 days later (29 December 2026, 18:00). Liya and Yonas have already submitted. They do not see marks. Staff do. An exam manager can change the date or choose **Release results now**, which emails the candidates.
 - **Junior IT Officer Recruitment Test** — scheduled release whose window already closed (31 October 2026). The default release, 14 days after the end, was 14 November 2026, so those marks are visible and the result emails are in Messages. The essay was marked by hand.
+
+## Exam day features
+
+- **Autosave that survives a bad connection.** Answers are kept on the student's device and sent in small batches. The player shows *All answers saved*, *Saving…* or *Offline – kept on this device, will retry*. A refresh or crash resumes where the student was, and the timer keeps running from the server clock.
+- **The server owns the clock.** When time runs out the server hands the exam in, even if the browser was closed (on the next request, and every 10 minutes from the scheduled function).
+- **Exam room rules** (Advanced settings): an exam code students must type to start, copy/paste/right-click off, and hand-in after N tab switches. One device at a time: a second device can take over, and the switch is logged.
+- **Monitor page**: live list (not started, writing, disconnected, submitted), add time for one student, hand in now, let a submitted student continue, extra time before the exam (accommodation), and a timeline per student.
+- **Fair random papers**: in Advanced settings choose *Each student gets a random set*, then how many easy, medium and hard questions each student gets.
+- **Negative marking** (optional): a wrong choice removes ¼, ⅓, ½ or all of the question's mark. Blank answers are never penalised.
+- **PDF and Word import**: Questions → Import → *From a PDF or Word file*. Typed papers with numbered questions, A–D options and `Answer: B` lines or an answer key at the end. You check and fix every question before saving.
+- **Question analysis** on each exam's results page: right %, discrimination (top 27% vs bottom 27%), and how many students chose each option. Also in the Excel and PDF exports, with median and lowest scores.
+- **Text size and high contrast** buttons in the exam player. Exam dates also show the Ethiopian calendar.
+- **Demo restore** (wipe and reseed) only works on a local database, or when `ALLOW_DEMO_RESTORE=true` is set.
 
 ## Result release
 

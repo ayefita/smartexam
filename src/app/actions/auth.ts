@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { authenticate, clearOtpCookie, clearSession, readOtpCookie, requireUser, setLocaleCookie, setOtpCookie, setSession } from "@/lib/auth";
-import { changeOwnPassword } from "@/lib/credentials";
+import { changeOwnPassword, changePasswordWithCurrent } from "@/lib/credentials";
 import { query } from "@/lib/db";
 import { smsEnabled } from "@/lib/messaging";
 import { safeNext } from "@/lib/format";
@@ -106,7 +106,12 @@ export async function localeAction(formData: FormData) {
 
 export async function changePasswordAction(_prev: { error: string }, formData: FormData) {
   const user = await requireUser(undefined, { allowPasswordChange: true });
-  const result = await changeOwnPassword(user, String(formData.get("password") || ""), String(formData.get("confirm") || ""));
+  const password = String(formData.get("password") || "");
+  const confirm = String(formData.get("confirm") || "");
+  // A forced change (temporary password) needs no old password; a voluntary one does.
+  const result = user.mustChangePassword
+    ? await changeOwnPassword(user, password, confirm)
+    : await changePasswordWithCurrent(user, String(formData.get("current") || ""), password, confirm);
   if (!result.ok) return { error: result.error };
   redirect(safeNext(String(formData.get("next") || "")));
 }

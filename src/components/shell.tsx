@@ -91,6 +91,7 @@ export function Shell({
     <p className="text-sm leading-tight">
       <span className="block font-medium">{name}</span>
       <span className="block text-xs opacity-80">{role}</span>
+      <Link href="/change-password" className="mt-1 block text-xs underline underline-offset-4 opacity-80 hover:opacity-100">{dict.world.admin.myPassword}</Link>
     </p>
   );
   return (

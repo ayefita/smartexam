@@ -5,8 +5,8 @@ import { Countdown } from "@/components/countdown";
 import { SetupGuide, type GuideStep } from "@/components/setup-guide";
 import { EmptyState, Notice, PageHeader, Pill } from "@/components/ui-app";
 import { requireUser } from "@/lib/auth";
-import { listExams, listMyExams, setupProgress, topicStrength } from "@/lib/domain";
-import { formatAddis } from "@/lib/format";
+import { demoRestoreAllowed, listExams, listMyExams, setupProgress, topicStrength } from "@/lib/domain";
+import { formatAddis, formatBoth } from "@/lib/format";
 import { fill } from "@/lib/i18n";
 import { getDictionary } from "@/lib/locale";
 import { candidateResultState } from "@/lib/results";
@@ -44,9 +44,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                       <h3 className="mt-2 font-heading text-xl">{card.exam.title}</h3>
                       <p className="text-sm text-muted-foreground">{fill(st.minutes, { n: card.exam.durationMinutes })} · {card.exam.organizationName}</p>
                       {kind === "upcoming" && card.exam.startAt ? (
-                        <p className="mt-2 text-sm font-medium" role="status"><Countdown dict={dict} to={card.exam.startAt} /> <span className="font-normal text-muted-foreground">· {fill(st.opensAt, { date: formatAddis(card.exam.startAt, locale) })}</span></p>
+                        <p className="mt-2 text-sm font-medium" role="status"><Countdown dict={dict} to={card.exam.startAt} /> <span className="font-normal text-muted-foreground">· {fill(st.opensAt, { date: formatBoth(card.exam.startAt, locale) })}</span></p>
                       ) : null}
-                      {kind === "open" && card.exam.endAt ? <p className="mt-2 text-sm">{fill(st.closesAt, { date: formatAddis(card.exam.endAt, locale) })}</p> : null}
+                      {kind === "open" && card.exam.endAt ? <p className="mt-2 text-sm">{fill(st.closesAt, { date: formatBoth(card.exam.endAt, locale) })}</p> : null}
                       {kind === "submitted" && card.showScore ? <p className="mt-2 text-lg font-semibold">{card.percentage}% · {card.passed ? dict.status.passed : dict.status.failed}</p> : null}
                       {kind === "submitted" && !card.showScore ? (
                         <p className="mt-2 text-sm" role="status">{state === "pending_release" || state === "pending_both" ? fill(st.resultOn, { date: formatAddis(card.exam.resultReleaseAt, locale) }) : st.waiting}</p>
@@ -116,7 +116,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </div>
         )}
       </section>
-      {user.role === "super_admin" ? (
+      {user.role === "super_admin" && demoRestoreAllowed() ? (
         <details className="max-w-xl rounded-2xl bg-muted p-4">
           <summary className="cursor-pointer font-medium">{dict.ux.editor.advanced}</summary>
           <form action={restoreAction} className="mt-3">

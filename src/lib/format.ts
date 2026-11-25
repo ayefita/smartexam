@@ -152,3 +152,29 @@ export function safeNext(value: string | null | undefined) {
   if (!value || !value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) return "/dashboard";
   return value;
 }
+
+/** The same moment on the Ethiopian calendar, e.g. "16 Hedar 2019 E.C." / "16 ኅዳር 2019 ዓ.ም.". */
+export function formatEthiopian(value: string | null, locale: string) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  try {
+    const parts = new Intl.DateTimeFormat(`${locale === "am" ? "am-ET" : "en"}-u-ca-ethiopic`, {
+      timeZone: "Africa/Addis_Ababa",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }).formatToParts(d);
+    const part = (type: string) => parts.find((item) => item.type === type)?.value || "";
+    return `${part("day")} ${part("month")} ${part("year")} ${locale === "am" ? "ዓ.ም." : "E.C."}`;
+  } catch {
+    return "";
+  }
+}
+
+/** Gregorian date and time in Addis Ababa, followed by the Ethiopian calendar date. */
+export function formatBoth(value: string | null, locale: string) {
+  if (!value) return "—";
+  const ethiopian = formatEthiopian(value, locale);
+  return ethiopian ? `${formatAddis(value, locale)} · ${ethiopian}` : formatAddis(value, locale);
+}

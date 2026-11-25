@@ -448,3 +448,23 @@ export async function changeOwnPassword(user: User, password: string, confirm: s
   await audit(user, "change_password", "user", user.id, user.email, user.organizationId);
   return { ok: true as const };
 }
+
+/** Change your own password from the account menu: the current password is required. */
+export async function changePasswordWithCurrent(user: User, current: string, password: string, confirm: string) {
+  const rows = await query(`select password_hash from users where id = $1`, [user.id]);
+  if (!rows[0] || !(await verifyPassword(current, String(rows[0].password_hash)))) return { ok: false as const, error: "current_password" };
+  return changeOwnPassword(user, password, confirm);
+}
+
+/** Super admin sets a new password for anyone. Their old sessions end, so the new password is needed. */
+export async function adminSetPassword(actor: User, userId: string, password: string, mustChange: boolean) {
+  if (actor.role !== "super_admin") return { ok: false as const, error: "forbidden" };
+  if (password.length < 8) return { ok: false as const, error: "password" };
+  const rows = await query(`select id, email, organization_id from users where id = $1`, [userId]);
+  if (!rows[0]) return { ok: false as const, error: "not_found" };
+  const self = userId === actor.id;
+  await query(`update users set password_hash = $1, must_change_password = $2 where id = $3`, [await hashPassword(password), mustChange && !self, userId]);
+  if (!self) await query(`delete from sessions where user_id = $1`, [userId]);
+  await audit(actor, "set_password", "user", userId, String(rows[0].email), rows[0].organization_id ? String(rows[0].organization_id) : null);
+  return { ok: true as const };
+}

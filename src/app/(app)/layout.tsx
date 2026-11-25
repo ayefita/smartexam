@@ -1,32 +1,37 @@
-import { Shell } from "@/components/shell";
+import { Shell, type NavSection } from "@/components/shell";
+import { Toaster } from "@/components/ui/sonner";
 import { requireUser } from "@/lib/auth";
 import { processDueReleases } from "@/lib/domain";
 import type { Dictionary } from "@/lib/i18n";
 import { getDictionary } from "@/lib/locale";
 
-function linksFor(role: string, dict: Dictionary) {
-  const staff = [
-    { href: "/dashboard", label: dict.nav.dashboard },
-    { href: "/questions", label: dict.nav.questions },
-    { href: "/exams", label: dict.nav.exams },
-    { href: "/reports", label: dict.nav.reports },
-    { href: "/departments", label: dict.nav.departments },
-    { href: "/users", label: dict.nav.users },
-    { href: "/groups", label: dict.nav.groups },
-    { href: "/notifications", label: dict.nav.notifications },
-  ];
-  if (role === "super_admin") {
-    staff.splice(4, 0, { href: "/organizations", label: dict.nav.organizations }, { href: "/categories", label: dict.nav.categories });
-    staff.push({ href: "/audit", label: dict.nav.audit });
-  }
+function linksFor(role: string, dict: Dictionary): NavSection[] {
+  const nav = dict.ux.nav;
   if (role === "candidate") {
-    return [
-      { href: "/dashboard", label: dict.nav.dashboard },
-      { href: "/history", label: dict.nav.history },
-      { href: "/notifications", label: dict.nav.notifications },
-    ];
+    return [{ items: [
+      { href: "/dashboard", label: dict.ux.student.myExams, icon: "home" },
+      { href: "/history", label: nav.myResults, icon: "results" },
+      { href: "/notifications", label: nav.messages, icon: "messages" },
+    ] }];
   }
-  return staff;
+  const sections: NavSection[] = [{ items: [
+    { href: "/dashboard", label: nav.home, icon: "home" },
+    { href: "/questions", label: nav.questions, icon: "questions" },
+    { href: "/exams", label: nav.exams, icon: "exams" },
+    { href: "/users", label: nav.students, icon: "students" },
+    { href: "/reports", label: nav.results, icon: "results" },
+  ] }];
+  if (role === "super_admin") {
+    sections.push({ title: nav.admin, items: [
+      { href: "/groups", label: nav.groups, icon: "groups" },
+      { href: "/organizations", label: nav.schools, icon: "schools" },
+      { href: "/categories", label: nav.categories, icon: "categories" },
+      { href: "/departments", label: nav.departments, icon: "departments" },
+      { href: "/notifications", label: nav.messages, icon: "messages" },
+      { href: "/audit", label: nav.audit, icon: "audit" },
+    ] });
+  }
+  return sections;
 }
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -34,8 +39,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const { dict, locale } = await getDictionary();
   await processDueReleases();
   return (
-    <Shell dict={dict} locale={locale} name={user.fullName} role={dict.roles[user.role]} links={linksFor(user.role, dict)}>
+    <Shell dict={dict} locale={locale} name={user.fullName} role={dict.ux.roles[user.role]} sections={linksFor(user.role, dict)}>
       {children}
+      <Toaster />
     </Shell>
   );
 }

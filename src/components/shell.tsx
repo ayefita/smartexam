@@ -3,6 +3,21 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import {
+  BarChart3Icon,
+  BookOpenIcon,
+  Building2Icon,
+  ClipboardListIcon,
+  FileQuestionIcon,
+  FolderTreeIcon,
+  HistoryIcon,
+  HomeIcon,
+  LayersIcon,
+  MailIcon,
+  MenuIcon,
+  UsersIcon,
+  UsersRoundIcon,
+} from "lucide-react";
 import { logoutAction } from "@/app/actions/auth";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { Button } from "@/components/ui/button";
@@ -10,42 +25,73 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { Logo } from "@/components/ui-app";
 import type { Dictionary, Locale } from "@/lib/i18n";
 
+const icons = {
+  home: HomeIcon,
+  questions: FileQuestionIcon,
+  exams: ClipboardListIcon,
+  students: UsersIcon,
+  results: BarChart3Icon,
+  groups: UsersRoundIcon,
+  schools: Building2Icon,
+  categories: LayersIcon,
+  departments: FolderTreeIcon,
+  messages: MailIcon,
+  audit: HistoryIcon,
+  book: BookOpenIcon,
+};
+
+export type NavItem = { href: string; label: string; icon: keyof typeof icons };
+export type NavSection = { title?: string; items: NavItem[] };
+
 export function Shell({
   dict,
   locale,
   name,
   role,
-  links,
+  sections,
   children,
 }: {
   dict: Dictionary;
   locale: Locale;
   name: string;
   role: string;
-  links: { href: string; label: string }[];
+  sections: NavSection[];
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const nav = (
-    <nav aria-label={dict.nav.main} className="grid gap-1">
-      {links.map((link) => {
-        const active = pathname === link.href || (link.href !== "/dashboard" && pathname.startsWith(link.href));
-        return (
-          <Link
-            key={link.href}
-            href={link.href}
-            aria-current={active ? "page" : undefined}
-            onClick={() => setOpen(false)}
-            className={`rounded-lg px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#f3e4b4] ${
-              active ? "bg-[#1a4032] text-white" : "text-[#d7e4dc] hover:bg-white/10"
-            }`}
-          >
-            {link.label}
-          </Link>
-        );
-      })}
+    <nav aria-label={dict.nav.main} className="grid gap-5">
+      {sections.map((section, index) => (
+        <div key={section.title || index} className="grid gap-1">
+          {section.title ? <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-[#b8cbbf]">{section.title}</p> : null}
+          {section.items.map((link) => {
+            const active = pathname === link.href || (link.href !== "/dashboard" && pathname.startsWith(`${link.href}/`)) || (link.href !== "/dashboard" && pathname === link.href);
+            const Icon = icons[link.icon] || BookOpenIcon;
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                aria-current={active ? "page" : undefined}
+                onClick={() => setOpen(false)}
+                className={`flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-[15px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#f3e4b4] ${
+                  active ? "bg-[#f3e4b4] font-semibold text-[#10281f]" : "text-[#e3ece6] hover:bg-white/10"
+                }`}
+              >
+                <Icon className="size-5 shrink-0" aria-hidden />
+                {link.label}
+              </Link>
+            );
+          })}
+        </div>
+      ))}
     </nav>
+  );
+  const who = (
+    <p className="text-sm leading-tight">
+      <span className="block font-medium">{name}</span>
+      <span className="block text-xs opacity-80">{role}</span>
+    </p>
   );
   return (
     <div className="min-h-screen bg-background">
@@ -53,35 +99,39 @@ export function Shell({
         {dict.skip}
       </a>
       <div className="md:grid md:grid-cols-[240px_1fr]">
-        <aside className="hidden min-h-screen flex-col bg-[#10281f] p-4 text-[#f6f3ec] md:flex">
-          <Logo light />
-          <div className="mt-8 flex-1">{nav}</div>
-          <p className="mt-6 text-xs text-[#d5e0d8]">{dict.footer}</p>
+        <aside className="hidden min-h-screen bg-[#10281f] text-[#f6f3ec] md:block">
+          <div className="sticky top-0 flex max-h-screen flex-col overflow-y-auto p-4">
+            <Logo light />
+            <div className="mt-8">{nav}</div>
+            <div className="mt-6 rounded-xl bg-white/5 p-3">{who}</div>
+          </div>
         </aside>
-        <div>
+        <div className="min-w-0">
           <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-border bg-background/95 px-4 py-3 backdrop-blur md:px-8">
             <div className="flex items-center gap-2 md:hidden">
               <Sheet open={open} onOpenChange={setOpen}>
-                <SheetTrigger render={<Button variant="outline" size="sm" aria-label={dict.nav.menu} />}>
-                  {dict.nav.menu}
+                <SheetTrigger render={<Button variant="outline" className="h-10 gap-2" aria-label={dict.nav.menu} />}>
+                  <MenuIcon className="size-5" aria-hidden />
+                  {dict.ux.nav.menu}
                 </SheetTrigger>
-                <SheetContent side="left" className="bg-[#10281f] text-[#f6f3ec]">
+                <SheetContent side="left" className="overflow-y-auto bg-[#10281f] text-[#f6f3ec]">
                   <SheetHeader>
                     <SheetTitle className="text-[#f6f3ec]">SmartExam</SheetTitle>
                   </SheetHeader>
-                  {nav}
+                  <div className="px-4 pb-3">{who}</div>
+                  <div className="px-2 pb-4">{nav}</div>
+                  <form action={logoutAction} className="px-4 pb-6">
+                    <Button type="submit" variant="outline" className="h-11 w-full text-foreground">{dict.nav.signOut}</Button>
+                  </form>
                 </SheetContent>
               </Sheet>
-              <Logo compact />
+              <span className="hidden min-[420px]:block"><Logo compact /></span>
             </div>
             <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
               <LanguageSwitcher locale={locale} />
-              <p className="hidden text-sm sm:block">
-                <span className="font-medium">{name}</span>
-                <span className="text-muted-foreground"> · {role}</span>
-              </p>
-              <form action={logoutAction}>
-                <Button type="submit" variant="outline" className="h-9">
+              <div className="hidden text-right sm:block md:hidden lg:block">{who}</div>
+              <form action={logoutAction} className="hidden sm:block">
+                <Button type="submit" variant="outline" className="h-10">
                   {dict.nav.signOut}
                 </Button>
               </form>

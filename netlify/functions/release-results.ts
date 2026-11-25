@@ -9,5 +9,6 @@ export default async () => {
 };
 
 export const config = {
-  schedule: "@hourly",
+  // Every 10 minutes: hands in exams whose time ran out while the browser was closed, and sends due results.
+  schedule: "*/10 * * * *",
 };

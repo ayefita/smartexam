@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { PGlite } from "@electric-sql/pglite";
+import { createHash } from "crypto";
 import postgres from "postgres";
 import { SCHEMA } from "./schema";
 
@@ -69,6 +69,7 @@ async function createRunner(): Promise<Runner> {
 
   const dir = path.join(process.cwd(), "data", "pglite");
   fs.mkdirSync(dir, { recursive: true });
+  const { PGlite } = await import("@electric-sql/pglite");
   const client = new PGlite(dir);
   await client.waitReady;
   return {
@@ -91,10 +92,30 @@ async function createRunner(): Promise<Runner> {
   };
 }
 
+const SCHEMA_VERSION = createHash("sha1").update(SCHEMA).digest("hex").slice(0, 16);
+
+/** Runs the full schema only when it changed since the last boot; otherwise one tiny read. */
+async function ensureSchema(runner: Runner) {
+  let current = "";
+  try {
+    const rows = await runner.query(`select value from app_meta where key = 'schema'`);
+    current = String(rows[0]?.value ?? "");
+  } catch {
+    // First boot on this database: app_meta does not exist yet.
+  }
+  if (current === SCHEMA_VERSION) return;
+  await runner.exec(SCHEMA);
+  await runner.query(
+    `insert into app_meta (key, value, updated_at) values ('schema', $1, now())
+     on conflict (key) do update set value = excluded.value, updated_at = now()`,
+    [SCHEMA_VERSION],
+  );
+}
+
 async function init(): Promise<Runner> {
   const runner = await createRunner();
+  await ensureSchema(runner);
   globalForDb.__smartexamRunner = runner;
-  await runner.exec(SCHEMA);
   const { seedIfEmpty } = await import("./seed");
   await seedIfEmpty();
   return runner;

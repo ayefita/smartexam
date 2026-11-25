@@ -5,6 +5,6 @@
 [build.environment]
   NODE_VERSION = "22"
 
-# netlify/functions/release-results.ts runs hourly and calls
+# netlify/functions/release-results.ts runs every 10 minutes and calls
 # GET /api/cron/release with Authorization: Bearer $CRON_SECRET.
 # Set CRON_SECRET, or the production route rejects the call.

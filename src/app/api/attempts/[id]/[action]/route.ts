@@ -1,5 +1,15 @@
 import { getCurrentUser } from "@/lib/auth";
-import { claimAttempt, heartbeat, logProctor, saveAnswer, submitAttempt } from "@/lib/domain";
+import { claimAttempt, heartbeat, logProctor, saveAnswer, saveAnswers, submitAttempt, type AnswerInput } from "@/lib/domain";
+
+function readAnswer(raw: Record<string, unknown>): AnswerInput {
+  return {
+    questionId: String(raw.questionId || ""),
+    selected: Array.isArray(raw.selected) ? raw.selected.map(String) : [],
+    text: String(raw.text || ""),
+    matching: raw.matching && typeof raw.matching === "object" ? (raw.matching as Record<string, string>) : {},
+    flagged: Boolean(raw.flagged),
+  };
+}
 
 export async function POST(request: Request, context: { params: Promise<{ id: string; action: string }> }) {
   const user = await getCurrentUser();
@@ -8,7 +18,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const { id, action } = await context.params;
   const body = await request.json().catch(() => ({}));
   const tabId = String(body.tabId || "");
-  if (action === "claim") return Response.json(await claimAttempt(user, id, tabId));
+  if (action === "claim") return Response.json(await claimAttempt(user, id, tabId, body.takeover === true));
+  if (action === "answers") {
+    const list = Array.isArray(body.answers) ? (body.answers as Record<string, unknown>[]) : [];
+    return Response.json(await saveAnswers(user, { attemptId: id, tabId, answers: list.map(readAnswer) }));
+  }
   if (action === "answer") {
     return Response.json(await saveAnswer(user, {
       attemptId: id,

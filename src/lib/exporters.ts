@@ -261,3 +261,162 @@ export async function certificatePdf(input: {
   }
   return Buffer.from(await pdf.save());
 }
+
+/** Wraps text to at most `max` lines, breaking long unspaced strings (emails, links) by character. */
+function fitLines(text: string, size: number, width: number, fonts: FaceSet, bold: boolean, max: number) {
+  const lines: string[] = [];
+  for (const line of wrapText(text, size, width, fonts, bold)) {
+    let rest = line;
+    while (measure(rest, size, fonts, bold) > width && rest.length > 1) {
+      let cut = rest.length - 1;
+      while (cut > 1 && measure(rest.slice(0, cut), size, fonts, bold) > width) cut -= 1;
+      lines.push(rest.slice(0, cut));
+      rest = rest.slice(cut);
+    }
+    lines.push(rest);
+  }
+  if (lines.length <= max) return lines;
+  const shown = lines.slice(0, max);
+  let last = shown[max - 1];
+  while (last.length > 1 && measure(`${last}…`, size, fonts, bold) > width) last = last.slice(0, -1);
+  shown[max - 1] = `${last}…`;
+  return shown;
+}
+
+export type LoginSlip = {
+  fullName: string;
+  candidateNumber: string;
+  email: string;
+  password?: string;
+  status: string;
+};
+
+export type LoginSlipLabels = {
+  slipTitle: string;
+  colNumber: string;
+  username: string;
+  password: string;
+  exam: string;
+  window: string;
+  signIn: string;
+  slipNote: string;
+  unchanged: string;
+};
+
+/** A4 sheets of eight cut-out sign-in slips (2 × 4) with dashed cut lines and a QR code. */
+export async function loginSlipsPdf(input: {
+  slips: LoginSlip[];
+  labels: LoginSlipLabels;
+  loginUrl: string;
+  exam: { title: string; window: string; link: string } | null;
+}) {
+  const { pdf, fonts, rgb } = await openPdf();
+  const { dashedLine } = await import("./pdf-lines");
+  const QRCode = (await import("qrcode")).default;
+  const target = input.exam?.link || input.loginUrl;
+  const qr = await pdf.embedPng(await QRCode.toBuffer(target, { width: 240, margin: 1 }));
+  const ink = rgb(0.1, 0.14, 0.12);
+  const soft = rgb(0.35, 0.38, 0.36);
+  const green = rgb(0.05, 0.36, 0.25);
+  const W = 595;
+  const H = 842;
+  const cols = 2;
+  const rows = 4;
+  const margin = 18;
+  const cellW = (W - margin * 2) / cols;
+  const cellH = (H - margin * 2) / rows;
+  const pad = 14;
+  const qrSize = 78;
+  const slips = input.slips.length ? input.slips : [];
+  for (let start = 0; start < slips.length; start += cols * rows) {
+    const page = pdf.addPage([W, H]);
+    for (let c = 1; c < cols; c += 1) dashedLine(page, margin + c * cellW, margin, margin + c * cellW, H - margin, soft);
+    for (let r = 0; r <= rows; r += 1) dashedLine(page, margin, margin + r * cellH, W - margin, margin + r * cellH, soft);
+    dashedLine(page, margin, margin, margin, H - margin, soft);
+    dashedLine(page, W - margin, margin, W - margin, H - margin, soft);
+    slips.slice(start, start + cols * rows).forEach((slip, index) => {
+      const col = index % cols;
+      const row = Math.floor(index / cols);
+      const x = margin + col * cellW + pad;
+      const top = H - margin - row * cellH - 12;
+      const bottom = H - margin - (row + 1) * cellH + 12;
+      const full = cellW - pad * 2;
+      let y = top - 9;
+      const put = (text: string, size: number, bold: boolean, color: RGB, width: number, max: number, left = x) => {
+        for (const part of fitLines(text, size, width, fonts, bold, max)) {
+          drawMixed(page, part, left, y, size, fonts, bold, color);
+          y -= size + 3.5;
+        }
+      };
+      put(input.labels.slipTitle, 8.5, true, green, full, 1);
+      y -= 2;
+      put(slip.fullName, 12, true, ink, full, 2);
+      if (slip.candidateNumber) put(`${input.labels.colNumber}: ${slip.candidateNumber}`, 8.5, false, soft, full, 1);
+      y -= 3;
+      const labelW = Math.max(measure(input.labels.username, 7.5, fonts, false), measure(input.labels.password, 7.5, fonts, false)) + 8;
+      const labelY = y;
+      drawMixed(page, input.labels.username, x, labelY, 7.5, fonts, false, soft);
+      put(slip.email, 9.5, true, ink, full - labelW, 2, x + labelW);
+      y -= 2;
+      drawMixed(page, input.labels.password, x, y + 1, 7.5, fonts, false, soft);
+      put(slip.password || input.labels.unchanged, slip.password ? 13 : 9, true, ink, full - labelW, 1, x + labelW);
+      page.drawImage(qr, { x: x + full - qrSize, y: bottom, width: qrSize, height: qrSize });
+      y -= 3;
+      const narrow = full - qrSize - 8;
+      if (input.exam) {
+        put(`${input.labels.exam}: ${input.exam.title}`, 8.5, true, ink, narrow, 2);
+        put(`${input.labels.window}: ${input.exam.window}`, 7.5, false, ink, narrow, 3);
+        put(`${input.labels.signIn}: ${input.exam.link}`, 7.5, false, ink, narrow, 3);
+      } else {
+        put(`${input.labels.signIn}: ${input.loginUrl}`, 8, false, ink, narrow, 2);
+      }
+      if (slip.password && y > bottom + 4) put(input.labels.slipNote, 7.5, false, soft, narrow, 2);
+    });
+  }
+  if (!slips.length) pdf.addPage([W, H]);
+  return Buffer.from(await pdf.save());
+}
+
+export async function loginsXlsx(input: {
+  rows: (LoginSlip & { statusLabel: string })[];
+  headers: string[];
+  loginUrl: string;
+  exam: { title: string; window: string; link: string } | null;
+}) {
+  const ExcelJS = (await import("exceljs")).default;
+  const book = new ExcelJS.Workbook();
+  const sheet = book.addWorksheet("Logins");
+  sheet.addRow(input.headers);
+  sheet.getRow(1).font = { bold: true };
+  for (const row of input.rows) {
+    sheet.addRow([
+      row.fullName,
+      row.candidateNumber,
+      row.email,
+      row.password || "",
+      row.statusLabel,
+      input.exam?.title || "",
+      input.exam?.window || "",
+      input.exam?.link || input.loginUrl,
+    ]);
+  }
+  [30, 16, 34, 20, 20, 30, 40, 50].forEach((width, index) => {
+    sheet.getColumn(index + 1).width = width;
+  });
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+  return Buffer.from(await book.xlsx.writeBuffer());
+}
+
+export async function candidateTemplateXlsx() {
+  const ExcelJS = (await import("exceljs")).default;
+  const book = new ExcelJS.Workbook();
+  const sheet = book.addWorksheet("Candidates");
+  sheet.addRow(["full_name", "email", "phone", "candidate_number"]);
+  sheet.getRow(1).font = { bold: true };
+  sheet.addRow(["Abebe Kebede", "abebe.kebede@example.com", "0911000000", "AAU-2026-001"]);
+  sheet.addRow(["ሊያ ተስፋዬ", "liya.tesfaye@example.com", "", "AAU-2026-002"]);
+  [28, 34, 18, 20].forEach((width, index) => {
+    sheet.getColumn(index + 1).width = width;
+  });
+  return Buffer.from(await book.xlsx.writeBuffer());
+}

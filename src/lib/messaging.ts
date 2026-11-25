@@ -42,6 +42,30 @@ function logDev(kind: string, destination: string, body: string) {
   }
 }
 
+type SmtpTransport = { sendMail: (message: { from: string; to: string; subject: string; text: string }) => Promise<unknown> };
+const smtpCache = globalThis as unknown as { __smartexamSmtp?: Promise<SmtpTransport> };
+
+/** One pooled SMTP connection per server instance, so batches do not reconnect for every message. */
+function smtpTransport() {
+  if (!smtpCache.__smartexamSmtp) {
+    smtpCache.__smartexamSmtp = import("nodemailer").then((nodemailer) => {
+      const port = Number(process.env.SMTP_PORT || 587);
+      return nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port,
+        secure: port === 465,
+        pool: true,
+        maxConnections: 2,
+        connectionTimeout: 10_000,
+        greetingTimeout: 10_000,
+        socketTimeout: 20_000,
+        auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+      }) as unknown as SmtpTransport;
+    });
+  }
+  return smtpCache.__smartexamSmtp;
+}
+
 export async function sendEmail(to: string, subject: string, text: string) {
   if (channelMode("email") === "dev") {
     logDev("email", to, `${subject} :: ${text}`);
@@ -65,20 +89,16 @@ export async function sendEmail(to: string, subject: string, text: string) {
     return { ok: true as const, mode: "live" as const };
   }
   if (provider === "smtp") {
-    const nodemailer = await import("nodemailer");
-    const port = Number(process.env.SMTP_PORT || 587);
-    const transport = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port,
-      secure: port === 465,
-      auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
-    });
-    await transport.sendMail({
-      from: process.env.SMTP_FROM || "SmartExam <noreply@smartexam.et>",
-      to,
-      subject,
-      text,
-    });
+    const message = { from: process.env.SMTP_FROM || "SmartExam <noreply@smartexam.et>", to, subject, text };
+    try {
+      await (await smtpTransport()).sendMail(message);
+    } catch (error) {
+      // A pooled connection can go stale while the function is idle. Reconnect once before giving up.
+      const code = (error as { code?: string; responseCode?: number }) || {};
+      if (code.responseCode && code.responseCode >= 500) throw error;
+      smtpCache.__smartexamSmtp = undefined;
+      await (await smtpTransport()).sendMail(message);
+    }
     return { ok: true as const, mode: "live" as const };
   }
   return { ok: false as const, mode: "live" as const, error: "No email provider is configured." };

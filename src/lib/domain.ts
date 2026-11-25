@@ -105,6 +105,8 @@ function mapUser(row: Record<string, unknown>): User {
     locale: locale === "am" || locale === "om" ? locale : "en",
     active: bool(row.active),
     createdAt: iso(row.created_at) || "",
+    mustChangePassword: bool(row.must_change_password),
+    candidateNumber: String(row.candidate_number ?? ""),
   };
 }
 
@@ -1029,7 +1031,7 @@ export async function unassignExam(actor: User, assignmentId: string): Promise<O
   return { ok: true };
 }
 
-async function assignedCandidates(examId: string) {
+export async function assignedCandidates(examId: string) {
   const rows = await query(
     `select distinct u.* from users u
      where u.role = 'candidate' and u.active = true and (

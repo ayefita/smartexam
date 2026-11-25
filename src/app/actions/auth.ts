@@ -1,7 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { authenticate, clearOtpCookie, clearSession, readOtpCookie, setLocaleCookie, setOtpCookie, setSession } from "@/lib/auth";
+import { authenticate, clearOtpCookie, clearSession, readOtpCookie, requireUser, setLocaleCookie, setOtpCookie, setSession } from "@/lib/auth";
+import { changeOwnPassword } from "@/lib/credentials";
 import { query } from "@/lib/db";
 import { smsEnabled } from "@/lib/messaging";
 import { safeNext } from "@/lib/format";
@@ -101,4 +102,11 @@ export async function localeAction(formData: FormData) {
     if (user) await query(`update users set locale = $1 where id = $2`, [locale, user.id]);
   }
   redirect(next);
+}
+
+export async function changePasswordAction(_prev: { error: string }, formData: FormData) {
+  const user = await requireUser(undefined, { allowPasswordChange: true });
+  const result = await changeOwnPassword(user, String(formData.get("password") || ""), String(formData.get("confirm") || ""));
+  if (!result.ok) return { error: result.error };
+  redirect(safeNext(String(formData.get("next") || "")));
 }

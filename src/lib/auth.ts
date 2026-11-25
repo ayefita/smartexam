@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { query } from "./db";
 import { loginAudit } from "./domain";
@@ -67,12 +67,18 @@ export async function getCurrentUser(): Promise<User | null> {
     locale: locale === "am" || locale === "om" ? locale : "en",
     active: bool(row.active),
     createdAt: "",
+    mustChangePassword: bool(row.must_change_password),
+    candidateNumber: String(row.candidate_number ?? ""),
   };
 }
 
-export async function requireUser(roles?: Role[]) {
+export async function requireUser(roles?: Role[], options: { allowPasswordChange?: boolean } = {}) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  if (user.mustChangePassword && !options.allowPasswordChange) {
+    const path = safeNext((await headers()).get("x-smartexam-path"));
+    redirect(path === "/dashboard" ? "/change-password" : `/change-password?next=${encodeURIComponent(path)}`);
+  }
   if (roles && !roles.includes(user.role)) redirect("/dashboard?forbidden=1");
   return user;
 }

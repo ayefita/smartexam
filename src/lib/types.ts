@@ -21,6 +21,10 @@ export type User = {
   locale: Locale;
   active: boolean;
   createdAt: string;
+  /** Staff-created accounts must replace their temporary password at first sign-in. */
+  mustChangePassword?: boolean;
+  /** Optional ID or index number supplied on import. */
+  candidateNumber?: string;
 };
 
 export type Organization = {

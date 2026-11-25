@@ -16,7 +16,10 @@ export function middleware(request: NextRequest) {
     url.pathname = "/dashboard";
     return NextResponse.redirect(url);
   }
-  return NextResponse.next();
+  // Lets server code send people back to the page they asked for (used by the forced password change).
+  const headers = new Headers(request.headers);
+  headers.set("x-smartexam-path", `${pathname}${request.nextUrl.search}`);
+  return NextResponse.next({ request: { headers } });
 }
 
 export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"] };

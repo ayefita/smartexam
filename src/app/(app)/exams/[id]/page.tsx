@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { acceptPaperAction, assignAction, deleteExamAction, proposePaperAction, releaseNowAction, resetSessionAction, unassignAction } from "@/app/actions/staff";
 import { AssistNote } from "@/components/assist-note";
+import { SendExamLogins } from "@/components/credentials";
 import { ExamEditor } from "@/components/exam-editor";
 import { Button } from "@/components/ui/button";
 import { NativeSelect, Notice, PageHeader, Pill } from "@/components/ui-app";
 import { latestSuggestion } from "@/lib/assist";
 import { requireUser } from "@/lib/auth";
-import { attemptCount, examQuestionLinks, getExam, listAssignments, listAttemptSummaries, listCategories, listDepartments, listGroups, listOrganizations, listQuestions, listUsers, managesOrg } from "@/lib/domain";
+import { assignedCandidates, attemptCount, examQuestionLinks, getExam, listAssignments, listAttemptSummaries, listCategories, listDepartments, listGroups, listOrganizations, listQuestions, listUsers, managesOrg } from "@/lib/domain";
 import { formatAddis } from "@/lib/format";
 import { fill } from "@/lib/i18n";
 import { getDictionary } from "@/lib/locale";
@@ -30,6 +31,7 @@ export default async function ExamPage({ params, searchParams }: { params: Promi
     listUsers(user),
     attemptCount(id),
   ]);
+  const assignedCount = (await assignedCandidates(id)).filter((person) => managesOrg(user, person.organizationId)).length;
   const candidates = users.filter((person) => person.role === "candidate");
   const published = questions.filter((question) => question.status === "published" && question.organizationId === exam.organizationId);
   const paper = await latestSuggestion("paper", exam.id);
@@ -100,6 +102,11 @@ export default async function ExamPage({ params, searchParams }: { params: Promi
             </li>
           ))}
         </ul>
+        <p className="mt-3 text-sm"><Link href={`/users/import?examId=${exam.id}`} className="font-medium text-primary underline-offset-4 hover:underline">{dict.creds.importLink}</Link></p>
+      </section>
+      <section>
+        <h2 className="font-heading text-xl">{dict.creds.sendAll}</h2>
+        <div className="mt-3"><SendExamLogins dict={dict} examId={exam.id} assignedCount={assignedCount} /></div>
       </section>
       <section>
         <h2 className="font-heading text-xl">{dict.exams.attempts}</h2>

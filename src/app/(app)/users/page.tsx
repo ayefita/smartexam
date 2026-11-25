@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { saveUserAction } from "@/app/actions/staff";
+import { ResetLoginButton } from "@/components/credentials";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, NativeSelect, Notice, PageHeader, Pill } from "@/components/ui-app";
@@ -13,7 +15,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
   const [users, organizations] = await Promise.all([listUsers(user), user.role === "super_admin" ? listOrganizations() : Promise.resolve([])]);
   return (
     <div>
-      <PageHeader title={dict.nav.users} />
+      <PageHeader title={dict.nav.users} actions={<Link href="/users/import" className="inline-flex h-10 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground">{dict.creds.importTitle}</Link>} />
       <Notice error text={params.error ? dict.errors[params.error as keyof typeof dict.errors] || dict.errors.generic : ""} />
       <form action={saveUserAction} className="mb-6 grid max-w-xl gap-3 rounded-2xl bg-card p-4 ring-1 ring-foreground/10">
         <Field label={dict.auth.fullName}><Input name="fullName" required className="h-11" /></Field>
@@ -32,8 +34,8 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
       <ul className="grid gap-2">
         {users.map((person) => (
           <li key={person.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-card px-4 py-3 ring-1 ring-foreground/10">
-            <span>{person.fullName}<span className="block text-sm text-muted-foreground">{person.email} {person.phone ? `· ${person.phone}` : ""}</span></span>
-            <span className="flex gap-2"><Pill>{dict.roles[person.role]}</Pill><Pill tone={person.active ? "good" : "wait"}>{person.active ? dict.status.active : dict.status.inactive}</Pill></span>
+            <span>{person.fullName}<span className="block text-sm text-muted-foreground">{person.email} {person.phone ? `· ${person.phone}` : ""} {person.candidateNumber ? `· ${person.candidateNumber}` : ""}</span></span>
+            <span className="flex flex-wrap items-start justify-end gap-2"><Pill>{dict.roles[person.role]}</Pill><Pill tone={person.active ? "good" : "wait"}>{person.active ? dict.status.active : dict.status.inactive}</Pill>{person.role === "candidate" && person.organizationId ? <ResetLoginButton dict={dict} userId={person.id} email={person.email} /> : null}</span>
           </li>
         ))}
       </ul>

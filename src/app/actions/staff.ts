@@ -19,6 +19,7 @@ import {
 } from "@/lib/assist";
 import { clearSession, requireUser } from "@/lib/auth";
 import { parseTabular } from "@/lib/csv";
+import { emailLogins, examLoginTargets, importCandidates, resetAndEmailLogins, type CredentialRow } from "@/lib/credentials";
 import {
   assignExam,
   deleteDepartment,
@@ -454,4 +455,51 @@ export async function restoreAction() {
   if (!result.ok) go("/dashboard", result.error);
   await clearSession();
   redirect("/login?notice=restored");
+}
+
+export type ImportCandidatesState = {
+  error: string;
+  rows: CredentialRow[];
+  examId: string;
+};
+
+export async function importCandidatesAction(_prev: ImportCandidatesState, formData: FormData): Promise<ImportCandidatesState> {
+  const actor = await requireUser(["super_admin", "exam_manager"]);
+  const empty = { rows: [], examId: "" };
+  const organizationId = String(formData.get("organizationId") || actor.organizationId || "");
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) return { ...empty, error: "file" };
+  if (file.size > 2 * 1024 * 1024) return { ...empty, error: "file" };
+  let table: string[][];
+  try {
+    table = await parseTabular(file.name, Buffer.from(await file.arrayBuffer()));
+  } catch {
+    return { ...empty, error: "file" };
+  }
+  table = table.filter((row) => row.some((cell) => String(cell || "").trim()));
+  const result = await importCandidates(actor, {
+    organizationId,
+    groupId: String(formData.get("groupId") || ""),
+    newGroupName: String(formData.get("newGroupName") || ""),
+    examId: String(formData.get("examId") || ""),
+    resetExisting: formData.get("resetExisting") === "on",
+    table,
+  });
+  if (!result.ok) return { ...empty, error: result.error };
+  return { error: "", rows: result.rows, examId: result.examId };
+}
+
+export async function emailLoginsAction(items: { userId: string; password: string }[], examId: string) {
+  const actor = await requireUser(["super_admin", "exam_manager"]);
+  return emailLogins(actor, Array.isArray(items) ? items.map((item) => ({ userId: String(item.userId), password: String(item.password || "") })) : [], String(examId || ""));
+}
+
+export async function resetAndEmailAction(userIds: string[], examId: string) {
+  const actor = await requireUser(["super_admin", "exam_manager"]);
+  return resetAndEmailLogins(actor, Array.isArray(userIds) ? userIds.map(String) : [], String(examId || ""));
+}
+
+export async function examLoginTargetsAction(examId: string) {
+  const actor = await requireUser(["super_admin", "exam_manager"]);
+  return (await examLoginTargets(actor, String(examId || ""))) ?? [];
 }

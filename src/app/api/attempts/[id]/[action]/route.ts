@@ -4,6 +4,7 @@ import { claimAttempt, heartbeat, logProctor, saveAnswer, submitAttempt } from "
 export async function POST(request: Request, context: { params: Promise<{ id: string; action: string }> }) {
   const user = await getCurrentUser();
   if (!user) return Response.json({ error: "forbidden" }, { status: 401 });
+  if (user.mustChangePassword) return Response.json({ error: "forbidden" }, { status: 403 });
   const { id, action } = await context.params;
   const body = await request.json().catch(() => ({}));
   const tabId = String(body.tabId || "");

@@ -210,6 +210,8 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_channel text NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password boolean NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS candidate_number text NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS verification_codes (
   id text PRIMARY KEY,

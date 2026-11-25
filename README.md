@@ -64,6 +64,22 @@ Exam schedule and result emails use the same email path. Without a provider they
 - Twilio: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`
 - AfroMessage: `AFROMESSAGE_TOKEN`, `AFROMESSAGE_SENDER`, optional `AFROMESSAGE_IDENTIFIER` and `AFROMESSAGE_API_URL` (default `https://api.afromessage.com/api/send`). The app calls that URL with `Authorization: Bearer` and `sender`, `to`, and `message`, which matches AfroMessage’s send API.
 
+## Bulk candidate logins
+
+Super admins and exam managers (for their own institution) can give many candidates their sign-in details at once.
+
+1. **Import** at **Users → Import candidates** (`/users/import`, also linked from each exam page). Upload `.xlsx` or `.csv` with the columns `full_name`, `email`, and optionally `phone` and `candidate_number` (aliases such as `name`, `id_number` or `student_id` work too). Get the CSV template from `/samples/candidate-import.csv` or the Excel template from `/api/credentials/template`. Up to 200 rows per file. Choose an institution, optionally a group (existing, or type a new name), and optionally an exam to assign.
+2. Each row is checked. Bad emails, missing names, invalid phones and rows listed twice are reported and skipped. An email that already belongs to a candidate of the same institution is reported as **Already registered**: it is added to the group or exam, and its password stays the same unless you tick **Also reset the password**. Emails of staff or of another institution are refused.
+3. New accounts are created verified, with a random 10-character temporary password (no look-alike characters such as 0/O or 1/l/I). They are flagged `must_change_password`, so the first sign-in goes to `/change-password` before anything else, then on to the page the candidate asked for (for example the exam link).
+4. From the results table:
+   - **Email logins** sends each candidate the login page, username, temporary password, and (when an exam was chosen) the exam title, window in Addis Ababa time, and direct link `https://<site>/take/<examId>`. Signed-out visitors to an exam link are sent to sign in and then back to the exam. Mail goes out in batches of 25 per request, one message at a time over a pooled SMTP connection, with a per-recipient result; a batch stops before the serverless time limit and the browser sends the rest.
+   - **Download login slips (PDF)** gives A4 pages of eight cut-out slips with name, ID number, username, temporary password, exam, window, link and a QR code. Amharic and other Ethiopic names print with Noto Sans Ethiopic.
+   - **Download as Excel** gives the same details as a spreadsheet.
+
+Temporary passwords are never stored in plain text: only the hash is saved, and the plain value lives in the results screen and the files you download then. Email and downloads only accept a password that matches the stored hash. To issue new ones later, use **Reset password and email** next to a candidate on the Users page, or **Send logins to all assigned candidates** on an exam page (it asks for confirmation, resets every assigned candidate, signs them out, and emails them). Every import, reset and send is written to the audit log.
+
+The columns come from migration `netlify/database/migrations/0004_candidate_logins` and are also added at boot by `src/lib/schema.ts`.
+
 ## Run locally
 
 ```bash
